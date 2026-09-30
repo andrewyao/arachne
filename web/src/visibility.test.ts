@@ -236,7 +236,7 @@ describe('private counts and vacant files', () => {
 
 describe('user hidden list', () => {
   it('drops a hidden fn and every edge touching it, with no shortcut', () => {
-    const hop = fnHiddenKey(mini, 16);
+    const hop = fnHiddenKey(mini, 17);
     expect(hop).toBe('fn:app/src/vis.rs#vis/hop().');
     const view = render(mini, { hide: [hop], showPrivate: [6], expanded: [6] });
     const vis = (s: string) => s.includes('vis.');
@@ -257,7 +257,7 @@ describe('user hidden list', () => {
   });
 
   it('finds the same node by key after the ids shift', () => {
-    const key = fnHiddenKey(mini, 18);
+    const key = fnHiddenKey(mini, 19);
     const shifted: Graph = build(
       { 'app/src/aaa.rs': [['aaa.first', false], ['aaa.second', false]] },
       [],
@@ -269,7 +269,7 @@ describe('user hidden list', () => {
 
     const pruned = removeUserHidden(shifted, [key]);
     expect([...pruned.fns].map((id) => shifted.fns[id]!.label)).toEqual(['vis.sink']);
-    expect([...pruned.fns]).toEqual([18 + offset]);
+    expect([...pruned.fns]).toEqual([19 + offset]);
   });
 
   it('hides two fns with the same label in one file independently', () => {

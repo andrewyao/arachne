@@ -30,7 +30,7 @@ describe('project on the mini fixture', () => {
         'file:2 > file:3 x1',
         'file:2 > file:4 x1',
         'file:2 > file:6 x1',
-        'file:4 > file:5 x1',
+        'file:4 > file:5 x2',
         'file:6 > file:1 x1',
       ].sort(),
     );
@@ -47,7 +47,7 @@ describe('project on the mini fixture', () => {
     expect(keys(v)).toEqual(
       [
         'file:0', 'file:1', 'file:2', 'file:3', 'file:5', 'file:6',
-        'fn:11', 'fn:12',
+        'fn:11', 'fn:12', 'fn:13',
       ].sort(),
     );
     expect(links(v)).toEqual(
@@ -60,6 +60,8 @@ describe('project on the mini fixture', () => {
         'file:6 > file:1 x1',
         'fn:11 > fn:12 x1',
         'fn:11 > file:5 x1',
+        'fn:12 > file:5 x1',
+        'fn:13 > fn:12 x1',
       ].sort(),
     );
   });
@@ -95,7 +97,7 @@ describe('effectiveExpanded', () => {
     const fnKeys = (v: View) => v.nodes.filter((n) => n.kind === 'fn').map((n) => n.key).sort();
 
     const before = project(mini, unhidden, effectiveExpanded('manual', manual, mini.files.length));
-    expect(fnKeys(before)).toEqual(['fn:11', 'fn:12']);
+    expect(fnKeys(before)).toEqual(['fn:11', 'fn:12', 'fn:13']);
 
     const all = project(mini, unhidden, effectiveExpanded('all', manual, mini.files.length));
     expect(all.nodes.some((n) => n.kind === 'file')).toBe(false);

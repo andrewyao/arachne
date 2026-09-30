@@ -143,25 +143,22 @@ pub fn build(
         let mut lines = Vec::new();
         let mut private = Vec::new();
         let mut keys = Vec::new();
-        let mut key_uses: HashMap<&str, u32> = HashMap::new();
         let mut local_of_entry = vec![None; doc.entries.len()];
         for (e, entry) in doc.entries.iter().enumerate() {
             let parent = doc.parents[e].and_then(|p| local_of_entry[p]);
-            let What::Def {
-                symbol,
-                name,
-                private: is_private,
-            } = &entry.what
-            else {
-                continue;
+            let (symbol, name, is_private) = match &entry.what {
+                What::Def {
+                    symbol,
+                    name,
+                    private,
+                } => (symbol, name, private),
+                What::Copy { of } => {
+                    local_of_entry[e] = local_of_entry[*of];
+                    continue;
+                }
+                What::Excluded => continue,
             };
-            let key = Symbol::descriptors_of(symbol).unwrap_or(symbol);
-            let uses = key_uses.entry(key).or_default();
-            *uses += 1;
-            keys.push(match *uses {
-                1 => key.to_string(),
-                n => format!("{key}#{n}"),
-            });
+            keys.push(Symbol::descriptors_of(symbol).unwrap_or(symbol).to_string());
             let (input, kind) = match parent {
                 None => (FnLabelInput::Named(name), FnKind::Named(name.clone())),
                 Some(p) => (
@@ -333,6 +330,9 @@ enum What {
         name: FnName,
         private: bool,
     },
+    /// A later definition of the symbol that entry `of` defines first. It is not a fn of its
+    /// own; occurrences inside it belong to that first definition's fn.
+    Copy { of: usize },
     /// A test region. Occurrences inside it belong to no fn.
     Excluded,
 }
@@ -402,6 +402,16 @@ impl<'a> Doc<'a> {
                 .cmp(&b.span.start)
                 .then(b.span.end.cmp(&a.span.end))
         });
+        let mut first_def: HashMap<String, usize> = HashMap::new();
+        for (i, entry) in entries.iter_mut().enumerate() {
+            let What::Def { symbol, .. } = &entry.what else {
+                continue;
+            };
+            let of = *first_def.entry(symbol.clone()).or_insert(i);
+            if of != i {
+                entry.what = What::Copy { of };
+            }
+        }
 
         let mut parents = Vec::with_capacity(entries.len());
         let mut stack: Vec<usize> = Vec::new();
@@ -490,35 +500,78 @@ mod tests {
             .collect()
     }
 
-    /// cfg alternates define the same symbol twice in one file; each still gets its own key.
+    /// rust-analyzer gives same-named nested fns in one file a single symbol.
     #[test]
-    fn fn_keys_are_the_scip_descriptors_and_unique_per_file() {
+    fn nested_fns_sharing_a_symbol_are_one_node_that_owns_every_copys_calls() {
         let src = "\
-#[cfg(unix)]
-fn open() {}
-#[cfg(windows)]
-fn open() {}
-fn close() {}
+fn write_a() {
+    fn push() { a(); }
+    push();
+}
+fn write_b() {
+    fn push() { b(); }
+    push();
+}
+fn write_c() {
+    fn push() { b(); }
+    push();
+}
+fn a() {}
+fn b() {}
 ";
-        let g = build_one(
-            vec![
-                occ("ui/open().", &[1, 3, 7], &[0, 0, 1, 12], true),
-                occ("ui/open().", &[3, 3, 7], &[2, 0, 3, 12], true),
-                occ("ui/close().", &[4, 3, 8], &[4, 0, 4, 13], true),
-            ],
-            (RUST.source_spans)(src),
-        );
-        let keys: Vec<(&str, &str)> = g
+        let parent = |name: &str, line: i32| {
+            [
+                occ(
+                    &format!("ui/{name}()."),
+                    &[line, 3, 10],
+                    &[line, 0, line + 3, 1],
+                    true,
+                ),
+                occ(
+                    "ui/push().",
+                    &[line + 1, 7, 11],
+                    &[line + 1, 4, line + 1, 22],
+                    true,
+                ),
+                occ("ui/push().", &[line + 2, 4, 8], &[], false),
+            ]
+        };
+        let mut occurrences: Vec<Occurrence> = [("write_a", 0), ("write_b", 4), ("write_c", 8)]
+            .into_iter()
+            .flat_map(|(name, line)| parent(name, line))
+            .collect();
+        occurrences.extend([
+            occ("ui/a().", &[1, 16, 17], &[], false),
+            occ("ui/b().", &[5, 16, 17], &[], false),
+            occ("ui/b().", &[9, 16, 17], &[], false),
+            occ("ui/a().", &[12, 3, 4], &[12, 0, 9], true),
+            occ("ui/b().", &[13, 3, 4], &[13, 0, 9], true),
+        ]);
+        let g = build_one(occurrences, (RUST.source_spans)(src));
+        let fns: Vec<(&str, &str, (u32, u32))> = g
             .fns
             .iter()
-            .map(|f| (f.label.as_str(), f.key.as_str()))
+            .map(|f| (f.label.as_str(), f.key.as_str(), f.lines))
             .collect();
         assert_eq!(
-            keys,
+            fns,
             [
-                ("ui.open", "ui/open()."),
-                ("ui.open", "ui/open().#2"),
-                ("ui.close", "ui/close()."),
+                ("ui.write_a", "ui/write_a().", (1, 4)),
+                ("ui.write_a::push", "ui/push().", (2, 2)),
+                ("ui.write_b", "ui/write_b().", (5, 8)),
+                ("ui.write_c", "ui/write_c().", (9, 12)),
+                ("ui.a", "ui/a().", (13, 13)),
+                ("ui.b", "ui/b().", (14, 14)),
+            ]
+        );
+        assert_eq!(
+            edges_by_label(&g),
+            [
+                ("ui.write_a", "ui.write_a::push", 1),
+                ("ui.write_a::push", "ui.a", 1),
+                ("ui.write_a::push", "ui.b", 2),
+                ("ui.write_b", "ui.write_a::push", 1),
+                ("ui.write_c", "ui.write_a::push", 1),
             ]
         );
     }

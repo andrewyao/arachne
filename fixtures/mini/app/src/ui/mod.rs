@@ -12,3 +12,10 @@ pub fn render(_album: &Album) {
     }
     helper();
 }
+
+pub fn summary() {
+    fn helper() -> usize {
+        util::format_error("empty").len()
+    }
+    helper();
+}
