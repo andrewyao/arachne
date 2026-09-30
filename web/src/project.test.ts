@@ -40,7 +40,7 @@ describe('project on the mini fixture', () => {
     expect(keys(v)).toEqual(
       [
         'file:0', 'file:1', 'file:2', 'file:3', 'file:5',
-        'fn:11', 'fn:12', 'fn:13',
+        'fn:11', 'fn:12',
       ].sort(),
     );
     expect(links(v)).toEqual(
@@ -50,8 +50,7 @@ describe('project on the mini fixture', () => {
         'file:2 > file:3 x1',
         'file:2 > fn:11 x1',
         'fn:11 > fn:12 x1',
-        'fn:11 > fn:13 x1',
-        'fn:12 > file:5 x1',
+        'fn:11 > file:5 x1',
       ].sort(),
     );
   });
@@ -73,7 +72,7 @@ describe('project on the mini fixture', () => {
   it('never makes a node for a file without fns', () => {
     const g: Graph = {
       ...mini,
-      files: [...mini.files, { path: 'app/src/db/mod.rs', label: 'db', fns: [15, 15] }],
+      files: [...mini.files, { path: 'app/src/db/mod.rs', label: 'db', fns: [14, 14] }],
     };
     expect(keys(project(g, new Set())).includes('file:6')).toBe(false);
     expect(keys(project(g, new Set([6]))).includes('file:6')).toBe(false);

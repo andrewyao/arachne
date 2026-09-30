@@ -1,7 +1,7 @@
 // Wire format of GET /api/graph. Mirrors src/wire.rs.
 // Edge endpoints are fn ids in 0..fns.length.
 
-export type FnKind = 'free' | 'method' | 'trait_decl' | 'trait_impl' | 'closure' | 'nested';
+export type FnKind = 'free' | 'method' | 'trait_decl' | 'trait_impl' | 'nested';
 
 export interface FileNode {
   path: string;
