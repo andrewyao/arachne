@@ -75,10 +75,10 @@ export function createGraphView(
         return FN_RADIUS;
       case 'file': {
         const [start, end] = graph.files[n.id]!.fns;
-        return 4 + 2.2 * Math.sqrt(end - start);
+        return 3 + 0.9 * Math.sqrt(end - start);
       }
       case 'crate':
-        return 6;
+        return 4;
     }
   };
 
