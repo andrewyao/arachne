@@ -17,7 +17,7 @@ interface Group<N> {
 // group's disc, so an expanded file reads as one compact blob that never swallows other nodes.
 export function clusterForce<N extends Body>(
   groupOf: (n: N) => number | undefined,
-  { pull, gap, push }: { pull: number; gap: number; push: number },
+  { pull, gap, push, spacing }: { pull: number; gap: number; push: number; spacing: number },
 ) {
   let nodes: N[] = [];
   const force = (alpha: number) => {
@@ -32,8 +32,9 @@ export function clusterForce<N extends Body>(
       group.cy += n.y ?? 0;
     }
     for (const group of groups.values()) {
-      group.cx /= group.members.length;
-      group.cy /= group.members.length;
+      const count = group.members.length;
+      group.cx /= count;
+      group.cy /= count;
       for (const n of group.members) {
         const dx = group.cx - (n.x ?? 0);
         const dy = group.cy - (n.y ?? 0);
@@ -41,6 +42,10 @@ export function clusterForce<N extends Body>(
         n.vy = (n.vy ?? 0) + dy * pull * alpha;
         group.reach = Math.max(group.reach, Math.hypot(dx, dy) + n.r);
       }
+      // The disc tracks the members' real extent, but capped near the extent a compact group of
+      // this size would have. Uncapped, pushing one group's members out of another's disc widens
+      // that group, which pushes harder, and with many groups the layout diverges.
+      group.reach = Math.min(group.reach, spacing * Math.sqrt(count));
     }
     for (const [id, group] of groups) {
       for (const n of nodes) {
@@ -51,7 +56,7 @@ export function clusterForce<N extends Body>(
         const d2 = dx * dx + dy * dy;
         if (d2 >= min * min) continue;
         const d = Math.sqrt(d2) || 1e-3;
-        const k = ((min - d) / d) * push;
+        const k = ((min - d) / d) * push * alpha;
         n.vx = (n.vx ?? 0) + dx * k;
         n.vy = (n.vy ?? 0) + dy * k;
       }
