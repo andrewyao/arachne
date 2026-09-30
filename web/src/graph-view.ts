@@ -53,6 +53,14 @@ const LINK_MAX_WIDTH = 2.5;
 const FN_LABEL_ZOOM = 1.2;
 const ARROW_ZOOM = 3;
 const LABEL_LINE = 1.25;
+// Expanding zooms in until a fn is about 9 CSS px across, which is comfortably clickable.
+const FOCUS_ZOOM = 9 / (2 * FN_RADIUS);
+const FOCUS_MS = 600;
+// Screen px. A click this close to a node's edge hits it; a click a little farther out is a
+// near miss and does nothing, rather than falling through to the hull and collapsing the file.
+const HIT_SLOP = 4;
+const NEAR_MISS = 10;
+const LINK_SLOP = 3;
 
 interface Label {
   text: string;
@@ -119,7 +127,7 @@ export function createGraphView(
       ctx.arc(n.x ?? 0, n.y ?? 0, n.r + 2, 0, 2 * Math.PI);
       ctx.fill();
     })
-    .linkWidth((l) => Math.min(LINK_MAX_WIDTH, 0.5 + Math.log2(l.count) * 0.6))
+    .linkWidth(linkWidth)
     .linkDirectionalArrowLength((l) => (zoomK < ARROW_ZOOM ? 0 : 3 + Math.log2(l.count)))
     .linkDirectionalArrowRelPos(1)
     .linkColor(linkColor)
@@ -129,9 +137,12 @@ export function createGraphView(
       hovered = n;
       root.style.cursor = n ? 'pointer' : '';
     })
-    .onNodeClick(clickNode)
-    .onBackgroundClick(clickEmpty)
-    .onLinkClick((_, e) => clickEmpty(e))
+    // force-graph resolves clicks from a shadow canvas it repaints at most every 800 ms, so
+    // while nodes or the camera move it reports whatever used to be under the pointer.
+    // Every click is re-resolved against live positions instead, and links never take hits.
+    .linkPointerAreaPaint(() => {})
+    .onNodeClick((_, e) => click(e))
+    .onBackgroundClick(click)
     .cooldownTicks(300)
     .onEngineStop(() => {
       if (fitted) return;
@@ -238,23 +249,56 @@ export function createGraphView(
 
   function collapse(fileId: number) {
     if (!expanded.delete(fileId)) return;
-    const [start, end] = graph.files[fileId]!.fns;
-    let sx = 0;
-    let sy = 0;
-    for (let fn = start; fn < end; fn++) {
-      const o = objects.get(fnKey(fn));
-      sx += o?.x ?? 0;
-      sy += o?.y ?? 0;
-    }
-    spawnAt.set(fileKey(fileId), [sx / (end - start), sy / (end - start)]);
+    spawnAt.set(fileKey(fileId), fnCentroid(fileId));
     if (hovered?.kind === 'fn' && graph.fns[hovered.id]!.file === fileId) hovered = null;
     refresh();
+  }
+
+  function click(e: MouseEvent) {
+    const rect = root.getBoundingClientRect();
+    const sx = e.clientX - rect.left;
+    const sy = e.clientY - rect.top;
+    const p = fg.screen2GraphCoords(sx, sy);
+    const k = fg.zoom();
+    const hit = nearestNode(p.x, p.y);
+    if (hit && hit.gap * k <= HIT_SLOP) return clickNode(hit.node);
+    if (hit && hit.gap * k <= NEAR_MISS) return;
+    if (onLink(sx, sy)) return;
+    for (const [fileId, hull] of hulls) {
+      if (insidePolygon(hull, [p.x, p.y])) return collapse(fileId);
+    }
+  }
+
+  function nearestNode(x: number, y: number): { node: SimNode; gap: number } | null {
+    let best: { node: SimNode; gap: number } | null = null;
+    for (const n of fg.graphData().nodes) {
+      const gap = Math.hypot((n.x ?? 0) - x, (n.y ?? 0) - y) - n.r;
+      if (!best || gap < best.gap) best = { node: n, gap };
+    }
+    return best;
+  }
+
+  function onLink(sx: number, sy: number): boolean {
+    const k = fg.zoom();
+    const o = fg.screen2GraphCoords(0, 0);
+    const toScreen = (n: SimNode): Point => [((n.x ?? 0) - o.x) * k, ((n.y ?? 0) - o.y) * k];
+    for (const l of fg.graphData().links) {
+      const [ax, ay] = toScreen(l.source as SimNode);
+      const [bx, by] = toScreen(l.target as SimNode);
+      const dx = bx - ax;
+      const dy = by - ay;
+      const t = Math.max(0, Math.min(1, ((sx - ax) * dx + (sy - ay) * dy) / (dx * dx + dy * dy || 1)));
+      const d = Math.hypot(sx - (ax + t * dx), sy - (ay + t * dy));
+      if (d <= linkWidth(l) / 2 + LINK_SLOP) return true;
+    }
+    return false;
   }
 
   function clickNode(n: SimNode) {
     switch (n.kind) {
       case 'file':
         expand(n.id);
+        focus(n.key);
         return;
       case 'fn': {
         const now = performance.now();
@@ -270,15 +314,31 @@ export function createGraphView(
     }
   }
 
-  function clickEmpty(e: MouseEvent) {
-    const rect = root.getBoundingClientRect();
-    const p = fg.screen2GraphCoords(e.clientX - rect.left, e.clientY - rect.top);
-    for (const [fileId, hull] of hulls) {
-      if (insidePolygon(hull, [p.x, p.y])) {
-        collapse(fileId);
-        return;
-      }
+  function focus(key: NodeKey) {
+    const at = centerOf(key);
+    if (!at) return;
+    // The first-layout auto-fit would otherwise zoom back out after the user acted.
+    fitted = true;
+    fg.centerAt(at[0], at[1], FOCUS_MS);
+    fg.zoom(Math.max(fg.zoom(), FOCUS_ZOOM), FOCUS_MS);
+  }
+
+  function centerOf(key: NodeKey): Point | null {
+    const o = objects.get(key);
+    if (o?.kind === 'file' && expanded.has(o.id)) return fnCentroid(o.id);
+    return o?.x === undefined || o.y === undefined ? null : [o.x, o.y];
+  }
+
+  function fnCentroid(fileId: number): Point {
+    const [start, end] = graph.files[fileId]!.fns;
+    let sx = 0;
+    let sy = 0;
+    for (let fn = start; fn < end; fn++) {
+      const o = objects.get(fnKey(fn));
+      sx += o?.x ?? 0;
+      sy += o?.y ?? 0;
     }
+    return [sx / (end - start), sy / (end - start)];
   }
 
   function select(fnId: number) {
@@ -440,13 +500,12 @@ export function createGraphView(
   return {
     expand,
     select,
-    focus(key) {
-      const o = objects.get(key);
-      if (o?.x === undefined || o.y === undefined) return;
-      fg.centerAt(o.x, o.y, 600);
-      fg.zoom(Math.max(fg.zoom(), 2.5), 600);
-    },
+    focus,
   };
+}
+
+function linkWidth(l: SimLink): number {
+  return Math.min(LINK_MAX_WIDTH, 0.5 + Math.log2(l.count) * 0.6);
 }
 
 function convexHull(points: Point[]): Point[] {
