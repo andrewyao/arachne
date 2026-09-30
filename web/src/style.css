@@ -225,6 +225,7 @@ body {
 /* code panel */
 
 .panel {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -233,9 +234,83 @@ body {
   background: var(--surface);
 }
 
+.panel-content {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.app.panel-collapsed {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.app.panel-collapsed .panel {
+  display: none;
+}
+
+.panel-hide,
+.panel-show {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--rule);
+  background: var(--surface);
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.panel-hide:hover,
+.panel-show:hover {
+  color: var(--ink);
+}
+
+.panel-hide:focus-visible,
+.panel-show:focus-visible {
+  outline: 2px solid var(--file);
+  outline-offset: 1px;
+}
+
+.panel-hide svg,
+.panel-show svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.panel-hide {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 1;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+}
+
+.panel-show {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  width: 22px;
+  height: 64px;
+  transform: translateY(-50%);
+  border-right: 0;
+  border-radius: 8px 0 0 8px;
+  box-shadow: -2px 0 8px rgba(0, 0, 0, 0.06);
+}
+
+.panel-show[hidden] {
+  display: none;
+}
+
 .panel-head {
   flex: none;
-  padding: 12px 16px 10px;
+  padding: 12px 48px 10px 16px;
   border-bottom: 1px solid var(--rule);
 }
 
@@ -318,6 +393,27 @@ body {
   .panel {
     border-left: 0;
     border-top: 1px solid var(--rule);
+  }
+
+  .app.panel-collapsed {
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .panel-hide svg,
+  .panel-show svg {
+    transform: rotate(90deg);
+  }
+
+  .panel-show {
+    top: auto;
+    right: 16px;
+    bottom: 0;
+    width: 64px;
+    height: 22px;
+    transform: none;
+    border-right: 1px solid var(--rule);
+    border-bottom: 0;
+    border-radius: 8px 8px 0 0;
   }
 
   .hint {

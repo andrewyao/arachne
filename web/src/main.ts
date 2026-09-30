@@ -1,6 +1,7 @@
 import './style.css';
 import { createCodePanel } from './code-panel';
 import { createGraphView } from './graph-view';
+import { createPanelToggle } from './panel-toggle';
 import { fileKey, fnKey } from './project';
 import { createSearch } from './search';
 import type { Graph } from './types';
@@ -11,7 +12,16 @@ async function main() {
   const graph: Graph = await res.json();
 
   const panel = createCodePanel(document.getElementById('panel')!, graph);
-  const view = createGraphView(document.getElementById('graph')!, graph, (fnId) => void panel.show(fnId));
+  const toggle = createPanelToggle(
+    document.getElementById('app')!,
+    document.getElementById('panel-hide') as HTMLButtonElement,
+    document.getElementById('panel-show') as HTMLButtonElement,
+  );
+  const openFn = (fnId: number) => {
+    toggle.open();
+    void panel.show(fnId);
+  };
+  const view = createGraphView(document.getElementById('graph')!, graph, openFn);
 
   createSearch(document.getElementById('search')!, graph, (pick) => {
     switch (pick.kind) {
@@ -23,7 +33,7 @@ async function main() {
         view.expand(graph.fns[pick.id]!.file);
         view.select(pick.id);
         view.focus(fnKey(pick.id));
-        void panel.show(pick.id);
+        openFn(pick.id);
     }
   });
 }

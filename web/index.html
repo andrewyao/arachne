@@ -17,7 +17,7 @@
     />
   </head>
   <body>
-    <main class="app">
+    <main class="app" id="app">
       <section class="stage">
         <div id="graph" class="graph"></div>
         <header class="bar">
@@ -27,8 +27,16 @@
         <p class="hint" id="hint">
           Click a file to open it. Double-click a function, or click the outline around it, to close the file.
         </p>
+        <button class="panel-show" id="panel-show" type="button" hidden aria-label="Show code panel" title="Show code panel ( \ )">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5" /></svg>
+        </button>
       </section>
-      <aside class="panel" id="panel"></aside>
+      <aside class="panel">
+        <button class="panel-hide" id="panel-hide" type="button" aria-label="Hide code panel" title="Hide code panel ( \ )">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5" /></svg>
+        </button>
+        <div class="panel-content" id="panel"></div>
+      </aside>
     </main>
     <script type="module" src="/src/main.ts"></script>
   </body>
