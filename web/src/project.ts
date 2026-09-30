@@ -20,6 +20,16 @@ export interface View {
 export const fileKey = (id: number): `file:${number}` => `file:${id}`;
 export const fnKey = (id: number): `fn:${number}` => `fn:${id}`;
 
+export type ExpandMode = 'manual' | 'all';
+
+export function effectiveExpanded(
+  mode: ExpandMode,
+  manual: ReadonlySet<number>,
+  fileCount: number,
+): ReadonlySet<number> {
+  return mode === 'all' ? new Set(Array.from({ length: fileCount }, (_, i) => i)) : manual;
+}
+
 export function project(g: Graph, expanded: ReadonlySet<number>): View {
   const nodes: ViewNode[] = [];
   g.files.forEach((file, fileId) => {

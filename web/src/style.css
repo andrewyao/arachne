@@ -95,8 +95,9 @@ body {
   left: 16px;
   right: 16px;
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
-  gap: 14px;
+  gap: 8px 14px;
   pointer-events: none;
 }
 
@@ -220,6 +221,44 @@ body {
 .results .empty {
   color: var(--ink-soft);
   cursor: default;
+}
+
+/* expansion mode */
+
+.mode {
+  display: flex;
+  flex: none;
+  height: 32px;
+  padding: 2px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.mode button {
+  padding: 0 10px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--ink-soft);
+  font: 13px var(--sans);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.mode button:hover {
+  color: var(--ink);
+}
+
+.mode button[aria-pressed='true'] {
+  background: var(--file);
+  color: var(--surface);
+  font-weight: 600;
+}
+
+.mode button:focus-visible {
+  outline: 2px solid var(--file);
+  outline-offset: 1px;
 }
 
 /* code panel */

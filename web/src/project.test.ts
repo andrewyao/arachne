@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { project, type View } from './project';
+import { effectiveExpanded, project, type View } from './project';
 import type { Graph } from './types';
 
 const mini: Graph = JSON.parse(
@@ -76,5 +76,24 @@ describe('project on the mini fixture', () => {
     };
     expect(keys(project(g, new Set())).includes('file:6')).toBe(false);
     expect(keys(project(g, new Set([6]))).includes('file:6')).toBe(false);
+  });
+});
+
+describe('effectiveExpanded', () => {
+  it('expands everything in all mode and restores only the manual picks after', () => {
+    const manual = new Set([4]);
+    const fnKeys = (v: View) => v.nodes.filter((n) => n.kind === 'fn').map((n) => n.key).sort();
+
+    const before = project(mini, effectiveExpanded('manual', manual, mini.files.length));
+    expect(fnKeys(before)).toEqual(['fn:11', 'fn:12']);
+
+    const all = project(mini, effectiveExpanded('all', manual, mini.files.length));
+    expect(all.nodes.some((n) => n.kind === 'file')).toBe(false);
+    expect(fnKeys(all)).toHaveLength(mini.fns.length);
+    expect([...manual]).toEqual([4]);
+
+    const after = project(mini, effectiveExpanded('manual', manual, mini.files.length));
+    expect(keys(after)).toEqual(keys(before));
+    expect([...manual]).toEqual([4]);
   });
 });

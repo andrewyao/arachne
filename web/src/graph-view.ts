@@ -2,7 +2,7 @@ import { forceCollide } from 'd3-force-3d';
 import ForceGraph from 'force-graph';
 import { LabelGrid, type Box } from './labels';
 import { clusterForce } from './layout';
-import { fileKey, fnKey, project, type NodeKey, type ViewNode } from './project';
+import { effectiveExpanded, fileKey, fnKey, project, type ExpandMode, type NodeKey, type ViewNode } from './project';
 import type { Graph } from './types';
 
 type SimNode = ViewNode & { x?: number; y?: number; vx?: number; vy?: number; r: number };
@@ -77,6 +77,7 @@ export interface GraphView {
   expand(fileId: number): void;
   focus(key: NodeKey): void;
   select(fnId: number): void;
+  setMode(mode: ExpandMode): void;
 }
 
 export function createGraphView(
@@ -84,7 +85,10 @@ export function createGraphView(
   graph: Graph,
   onOpenFn: (fnId: number) => void,
 ): GraphView {
-  const expanded = new Set<number>();
+  const manual = new Set<number>();
+  let mode: ExpandMode = 'manual';
+  // A snapshot, never `manual` itself, so sync() can diff the old view against the new one.
+  let expanded: ReadonlySet<number> = new Set();
   const objects = new Map<NodeKey, SimNode>();
   const spawnAt = new Map<NodeKey, Point>();
   let hulls = new Map<number, Point[]>();
@@ -98,7 +102,7 @@ export function createGraphView(
   let selected: number | null = null;
   let lastFnClick: { fnId: number; at: number } | null = null;
   let theme = readTheme();
-  let fitted = false;
+  let fitOnStop = true;
   let zoomK = 1;
   let origin = { x: 0, y: 0 };
 
@@ -145,8 +149,8 @@ export function createGraphView(
     .onBackgroundClick(click)
     .cooldownTicks(300)
     .onEngineStop(() => {
-      if (fitted) return;
-      fitted = true;
+      if (!fitOnStop) return;
+      fitOnStop = false;
       fg.zoomToFit(400, 80);
     });
 
@@ -232,7 +236,41 @@ export function createGraphView(
   }
 
   function expand(fileId: number) {
-    if (expanded.has(fileId)) return;
+    if (mode === 'all' || manual.has(fileId)) return;
+    manual.add(fileId);
+    sync();
+  }
+
+  function collapse(fileId: number) {
+    if (mode === 'all' || !manual.delete(fileId)) return;
+    sync();
+  }
+
+  function setMode(next: ExpandMode) {
+    if (next === mode) return;
+    mode = next;
+    sync();
+    if (mode === 'all') {
+      fitOnStop = true;
+      fg.zoomToFit(FOCUS_MS, 80);
+    }
+  }
+
+  // Newly expanded files burst out from where their node was; newly collapsed files reappear
+  // at the centroid of their fns.
+  function sync() {
+    const next = new Set(effectiveExpanded(mode, manual, graph.files.length));
+    for (const fileId of next) if (!expanded.has(fileId)) spawnFns(fileId);
+    for (const fileId of expanded) {
+      if (next.has(fileId)) continue;
+      spawnAt.set(fileKey(fileId), fnCentroid(fileId));
+      if (hovered?.kind === 'fn' && graph.fns[hovered.id]!.file === fileId) hovered = null;
+    }
+    expanded = next;
+    refresh();
+  }
+
+  function spawnFns(fileId: number) {
     const file = objects.get(fileKey(fileId));
     const [cx, cy] = [file?.x ?? 0, file?.y ?? 0];
     const [start, end] = graph.files[fileId]!.fns;
@@ -243,15 +281,6 @@ export function createGraphView(
       const d = n === 1 ? 0 : 6;
       spawnAt.set(fnKey(fn), [cx + d * Math.cos(a), cy + d * Math.sin(a)]);
     }
-    expanded.add(fileId);
-    refresh();
-  }
-
-  function collapse(fileId: number) {
-    if (!expanded.delete(fileId)) return;
-    spawnAt.set(fileKey(fileId), fnCentroid(fileId));
-    if (hovered?.kind === 'fn' && graph.fns[hovered.id]!.file === fileId) hovered = null;
-    refresh();
   }
 
   function click(e: MouseEvent) {
@@ -317,8 +346,8 @@ export function createGraphView(
   function focus(key: NodeKey) {
     const at = centerOf(key);
     if (!at) return;
-    // The first-layout auto-fit would otherwise zoom back out after the user acted.
-    fitted = true;
+    // A pending auto-fit would otherwise zoom back out after the user acted.
+    fitOnStop = false;
     fg.centerAt(at[0], at[1], FOCUS_MS);
     fg.zoom(Math.max(fg.zoom(), FOCUS_ZOOM), FOCUS_MS);
   }
@@ -501,6 +530,7 @@ export function createGraphView(
     expand,
     select,
     focus,
+    setMode,
   };
 }
 

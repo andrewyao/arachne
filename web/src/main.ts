@@ -1,6 +1,7 @@
 import './style.css';
 import { createCodePanel } from './code-panel';
 import { createGraphView } from './graph-view';
+import { createModeToggle } from './mode-toggle';
 import { createPanelToggle } from './panel-toggle';
 import { fileKey, fnKey } from './project';
 import { createSearch } from './search';
@@ -22,6 +23,14 @@ async function main() {
     void panel.show(fnId);
   };
   const view = createGraphView(document.getElementById('graph')!, graph, openFn);
+
+  const hint = document.getElementById('hint')!;
+  const manualHint = hint.textContent;
+  createModeToggle(document.getElementById('mode')!, (mode) => {
+    view.setMode(mode);
+    hint.textContent =
+      mode === 'all' ? 'Every file is expanded. Switch back to Manual, or press E, to return to your own selection.' : manualHint;
+  });
 
   createSearch(document.getElementById('search')!, graph, (pick) => {
     switch (pick.kind) {
