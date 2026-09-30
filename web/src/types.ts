@@ -12,6 +12,8 @@ export interface FileNode {
 export interface FnNode {
   file: number;
   label: string;
+  /** Identifies the fn within its file across re-indexing, unlike its id or label. */
+  key: string;
   kind: FnKind;
   lines: [start: number, end: number];
   /** Unreachable from outside its module, by the language's rules. */

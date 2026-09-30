@@ -28,6 +28,10 @@ pub struct Func {
     pub file: u32,
     /// Full display label, e.g. `album.Photo::load`.
     pub label: String,
+    /// Identifies the fn within its file across re-indexing, unlike its id or label: the SCIP
+    /// descriptors, e.g. `album/impl#[Photo]load().`, with `#2`, `#3` appended in source order
+    /// when fns share them (cfg alternates).
+    pub key: String,
     pub kind: FnKind,
     /// 1-based, inclusive.
     pub lines: (u32, u32),

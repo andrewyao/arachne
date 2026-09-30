@@ -37,6 +37,15 @@ impl Symbol {
         })
     }
 
+    /// The descriptor part of a symbol string, without scheme, manager, package and version.
+    pub fn descriptors_of(s: &str) -> Option<&str> {
+        let mut rest = s;
+        for _ in 0..4 {
+            rest = space_field(rest)?.1;
+        }
+        Some(rest)
+    }
+
     pub fn is_callable(&self) -> bool {
         matches!(self.descriptors.last(), Some(Descriptor::Method(_)))
     }

@@ -1,6 +1,6 @@
 import type { HiddenStore } from './hidden-store';
 import type { Graph } from './types';
-import type { HiddenKey, HiddenTarget } from './visibility';
+import { parseHiddenKey, type HiddenKey, type HiddenTarget } from './visibility';
 
 const COLLAPSED_KEY = 'arachne.hiddenListCollapsed';
 
@@ -73,7 +73,8 @@ export function createHiddenList(
 
   const row = (key: HiddenKey, target: HiddenTarget | undefined): HTMLLIElement => {
     const li = document.createElement('li');
-    const kind = target?.kind ?? (key.includes('#') ? 'fn' : 'file');
+    const named = parseHiddenKey(key);
+    const kind = named.kind;
     const open = document.createElement('button');
     open.type = 'button';
     open.className = 'hidden-open';
@@ -88,9 +89,9 @@ export function createHiddenList(
       open.addEventListener('click', () => onOpen(target));
     } else {
       li.classList.add('missing');
-      label.textContent = kind === 'fn' ? key.slice(key.indexOf('#') + 1) : key;
+      label.textContent = named.kind === 'fn' ? named.fn : named.path;
       open.disabled = true;
-      open.title = `${key} is no longer in the graph`;
+      open.title = `${named.kind === 'fn' ? `${named.fn} in ${named.path}` : named.path} is no longer in the graph`;
       const tag = document.createElement('span');
       tag.className = 'hidden-tag';
       tag.textContent = 'missing';

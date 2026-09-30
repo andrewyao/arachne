@@ -26,6 +26,7 @@ pub struct File {
 pub struct Func {
     pub file: FileId,
     pub label: String,
+    pub key: String,
     pub kind: FnKind,
     /// 1-based, inclusive.
     pub lines: (u32, u32),
@@ -73,6 +74,7 @@ impl CallGraph {
                 .map(|f| wire::Func {
                     file: f.file.0,
                     label: f.label.clone(),
+                    key: f.key.clone(),
                     kind: match &f.kind {
                         FnKind::Named(FnName::Free { .. }) => wire::FnKind::Free,
                         FnKind::Named(FnName::Method { .. }) => wire::FnKind::Method,
@@ -140,17 +142,26 @@ pub fn build(
         let mut kinds = Vec::new();
         let mut lines = Vec::new();
         let mut private = Vec::new();
+        let mut keys = Vec::new();
+        let mut key_uses: HashMap<&str, u32> = HashMap::new();
         let mut local_of_entry = vec![None; doc.entries.len()];
         for (e, entry) in doc.entries.iter().enumerate() {
             let parent = doc.parents[e].and_then(|p| local_of_entry[p]);
             let What::Def {
+                symbol,
                 name,
                 private: is_private,
-                ..
             } = &entry.what
             else {
                 continue;
             };
+            let key = Symbol::descriptors_of(symbol).unwrap_or(symbol);
+            let uses = key_uses.entry(key).or_default();
+            *uses += 1;
+            keys.push(match *uses {
+                1 => key.to_string(),
+                n => format!("{key}#{n}"),
+            });
             let (input, kind) = match parent {
                 None => (FnLabelInput::Named(name), FnKind::Named(name.clone())),
                 Some(p) => (
@@ -168,12 +179,17 @@ pub fn build(
             private.push(*is_private);
         }
         let fn_labels = labels::fn_labels(&file_label, &label_inputs);
-        for (((label, kind), lines), private) in
-            fn_labels.into_iter().zip(kinds).zip(lines).zip(private)
+        for ((((label, key), kind), lines), private) in fn_labels
+            .into_iter()
+            .zip(keys)
+            .zip(kinds)
+            .zip(lines)
+            .zip(private)
         {
             fns.push(Func {
                 file: FileId(file_idx as u32),
                 label,
+                key,
                 kind,
                 lines,
                 private,
@@ -472,6 +488,39 @@ mod tests {
             .iter()
             .map(|&(a, b, n)| (label(a), label(b), n))
             .collect()
+    }
+
+    /// cfg alternates define the same symbol twice in one file; each still gets its own key.
+    #[test]
+    fn fn_keys_are_the_scip_descriptors_and_unique_per_file() {
+        let src = "\
+#[cfg(unix)]
+fn open() {}
+#[cfg(windows)]
+fn open() {}
+fn close() {}
+";
+        let g = build_one(
+            vec![
+                occ("ui/open().", &[1, 3, 7], &[0, 0, 1, 12], true),
+                occ("ui/open().", &[3, 3, 7], &[2, 0, 3, 12], true),
+                occ("ui/close().", &[4, 3, 8], &[4, 0, 4, 13], true),
+            ],
+            (RUST.source_spans)(src),
+        );
+        let keys: Vec<(&str, &str)> = g
+            .fns
+            .iter()
+            .map(|f| (f.label.as_str(), f.key.as_str()))
+            .collect();
+        assert_eq!(
+            keys,
+            [
+                ("ui.open", "ui/open()."),
+                ("ui.open", "ui/open().#2"),
+                ("ui.close", "ui/close()."),
+            ]
+        );
     }
 
     /// Spans come from the real tree-sitter pass, so closures in the source are seen.

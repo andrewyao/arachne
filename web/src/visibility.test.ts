@@ -3,20 +3,29 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { effectiveExpanded, project, type NodeKey, type View } from './project';
 import type { FnNode, Graph } from './types';
-import { contract, fileHiddenKey, fnHiddenKey, hiddenFns, removeUserHidden, visible, type HiddenKey } from './visibility';
+import {
+  contract,
+  fileHiddenKey,
+  fnHiddenKey,
+  hiddenFns,
+  parseHiddenKey,
+  removeUserHidden,
+  visible,
+  type HiddenKey,
+} from './visibility';
 
 const mini: Graph = JSON.parse(
   readFileSync(resolve(import.meta.dirname, '../../fixtures/mini.graph.json'), 'utf8'),
 );
 
-// Builds a graph from `{ path: [[label, private]] }`. Calls name fns by label.
-function build(files: Record<string, [label: string, priv: boolean][]>, calls: [string, string, number?][]): Graph {
+// Builds a graph from `{ path: [[label, private, key?]] }`. Calls name fns by label.
+function build(files: Record<string, [label: string, priv: boolean, key?: string][]>, calls: [string, string, number?][]): Graph {
   const g: Graph = { project: '/p', files: [], fns: [], edges: [] };
   for (const [path, fns] of Object.entries(files)) {
     const file = g.files.length;
     const start = g.fns.length;
-    for (const [label, priv] of fns) {
-      g.fns.push({ file, label, kind: 'free', lines: [1, 1], private: priv } satisfies FnNode);
+    for (const [label, priv, key = `${label}().`] of fns) {
+      g.fns.push({ file, label, key, kind: 'free', lines: [1, 1], private: priv } satisfies FnNode);
     }
     g.files.push({ path, label: path, fns: [start, g.fns.length] });
   }
@@ -175,7 +184,7 @@ describe('private fn contraction', () => {
 describe('user hidden list', () => {
   it('drops a hidden fn and every edge touching it, with no shortcut', () => {
     const hop = fnHiddenKey(mini, 16);
-    expect(hop).toBe('app/src/vis.rs#vis.hop');
+    expect(hop).toBe('fn:app/src/vis.rs#vis/hop().');
     const view = render(mini, { hide: [hop], showPrivate: [6], expanded: [6] });
     const vis = (s: string) => s.includes('vis.');
     expect(nodes(mini, view).filter(vis)).toEqual(['vis.Hop::step', 'vis.entry', 'vis.relay', 'vis.sink'].sort());
@@ -186,7 +195,7 @@ describe('user hidden list', () => {
 
   it('drops a hidden file and all its fns, in manual and Expand All modes', () => {
     const vis = fileHiddenKey(mini, 6);
-    expect(vis).toBe('app/src/vis.rs');
+    expect(vis).toBe('file:app/src/vis.rs');
     for (const expanded of [[], [6], 'all'] as const) {
       const view = render(mini, { hide: [vis], expanded: expanded === 'all' ? 'all' : [...expanded] });
       expect(nodes(mini, view).filter((n) => n.includes('vis'))).toEqual([]);
@@ -210,6 +219,31 @@ describe('user hidden list', () => {
     expect([...pruned.fns]).toEqual([18 + offset]);
   });
 
+  it('hides two fns with the same label in one file independently', () => {
+    const g = build({ m: [['m.open', false, 'open().'], ['m.open', false, 'open().#2'], ['m.close', false]] }, []);
+    expect(fnHiddenKey(g, 0)).not.toBe(fnHiddenKey(g, 1));
+    expect([...removeUserHidden(g, [fnHiddenKey(g, 1)]).fns]).toEqual([1]);
+    expect([...removeUserHidden(g, [fnHiddenKey(g, 0)]).fns]).toEqual([0]);
+  });
+
+  it('keeps a fn key when an unrelated new file forces its label to change', () => {
+    const before = build({ 'src/ui/util.rs': [['util.fmt', false, 'ui/util/fmt().']] }, []);
+    const after = build(
+      { 'src/db/util.rs': [['db/util.fmt', false, 'db/util/fmt().']], 'src/ui/util.rs': [['ui/util.fmt', false, 'ui/util/fmt().']] },
+      [],
+    );
+    const key = fnHiddenKey(before, 0);
+    expect([...removeUserHidden(after, [key]).fns].map((id) => after.fns[id]!.label)).toEqual(['ui/util.fmt']);
+  });
+
+  it('keeps keys unambiguous when a path contains #', () => {
+    const g = build({ 'a.rs': [['a.x', false, 'b.rs#k']], 'a.rs#b.rs': [['ab.k', false, 'k']] }, []);
+    expect(fnHiddenKey(g, 0)).not.toBe(fnHiddenKey(g, 1));
+    expect([...removeUserHidden(g, [fnHiddenKey(g, 1)]).fns]).toEqual([1]);
+    expect(parseHiddenKey(fnHiddenKey(g, 1))).toEqual({ kind: 'fn', path: 'a.rs#b.rs', fn: 'k' });
+    expect(parseHiddenKey(fileHiddenKey(g, 1))).toEqual({ kind: 'file', path: 'a.rs#b.rs' });
+  });
+
   it('applies the hidden list before contraction, so no shortcut runs through a hidden fn', () => {
     const g = build(
       { m: [['A', false], ['C', true], ['D', false], ['E', false]] },
@@ -221,7 +255,7 @@ describe('user hidden list', () => {
   });
 
   it('ignores a stored key that no longer names anything', () => {
-    const pruned = removeUserHidden(mini, ['app/src/gone.rs' as HiddenKey, 'app/src/vis.rs#vis.gone' as HiddenKey]);
+    const pruned = removeUserHidden(mini, ['file:app/src/gone.rs' as HiddenKey, 'fn:app/src/vis.rs#vis/gone().' as HiddenKey]);
     expect(pruned.fns.size + pruned.files.size).toBe(0);
     expect(pruned.edges).toEqual(mini.edges);
   });

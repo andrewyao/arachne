@@ -5,14 +5,32 @@ import type { Graph } from './types';
 // - Private fns with a caller are contracted away: calls through them become `via` edges.
 // The hidden list applies first, so no contracted path runs through a node the user hid.
 
-/** A file's relative path, or `path#label` for a fn. Stable across re-index, unlike ids. */
-export type HiddenKey = string & { readonly __brand: 'HiddenKey' };
+/**
+ * `file:<path>` or `fn:<path>#<fn key>`. Stable across re-index, unlike ids and labels. `%` and
+ * `#` in the path are escaped, so the first `#` always ends the path.
+ */
+export type HiddenKey = (`file:${string}` | `fn:${string}`) & { readonly __brand: 'HiddenKey' };
 
-export const fileHiddenKey = (g: Graph, fileId: number): HiddenKey => g.files[fileId]!.path as HiddenKey;
+const escapePath = (path: string) => path.replace(/%/g, '%25').replace(/#/g, '%23');
+const unescapePath = (path: string) => path.replace(/%23/g, '#').replace(/%25/g, '%');
+
+export const fileHiddenKey = (g: Graph, fileId: number): HiddenKey =>
+  `file:${escapePath(g.files[fileId]!.path)}` as HiddenKey;
 export const fnHiddenKey = (g: Graph, fnId: number): HiddenKey => {
   const fn = g.fns[fnId]!;
-  return `${g.files[fn.file]!.path}#${fn.label}` as HiddenKey;
+  return `fn:${escapePath(g.files[fn.file]!.path)}#${fn.key}` as HiddenKey;
 };
+
+/** What a stored key names, for showing an entry whose target no longer exists. */
+export function parseHiddenKey(key: HiddenKey): { kind: 'file'; path: string } | { kind: 'fn'; path: string; fn: string } {
+  if (key.startsWith('file:')) return { kind: 'file', path: unescapePath(key.slice('file:'.length)) };
+  const rest = key.slice('fn:'.length);
+  const hash = rest.indexOf('#');
+  return { kind: 'fn', path: unescapePath(rest.slice(0, hash)), fn: rest.slice(hash + 1) };
+}
+
+export const isHiddenKey = (s: unknown): s is HiddenKey =>
+  typeof s === 'string' && (s.startsWith('file:') || (s.startsWith('fn:') && s.includes('#')));
 
 export type HiddenTarget = { kind: 'file'; id: number } | { kind: 'fn'; id: number };
 

@@ -1,4 +1,4 @@
-import type { HiddenKey } from './visibility';
+import { isHiddenKey, type HiddenKey } from './visibility';
 
 export interface HiddenStore {
   /** Newest first. */
@@ -40,7 +40,7 @@ export function createHiddenStore(project: string): HiddenStore {
 function load(storageKey: string): HiddenKey[] {
   try {
     const raw: unknown = JSON.parse(localStorage.getItem(storageKey) ?? '[]');
-    return Array.isArray(raw) ? raw.filter((k): k is HiddenKey => typeof k === 'string') : [];
+    return Array.isArray(raw) ? raw.filter(isHiddenKey) : [];
   } catch {
     return [];
   }
