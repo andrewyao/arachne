@@ -8,7 +8,7 @@ const mini: Graph = JSON.parse(
   readFileSync(resolve(import.meta.dirname, '../../fixtures/mini.graph.json'), 'utf8'),
 );
 
-// Files: 0 album, 1 db/util, 2 app, 3 shapes, 4 ui, 5 ui/util. Crates: 0 rawish, 1 std.
+// Files: 0 album, 1 db/util, 2 app, 3 shapes, 4 ui, 5 ui/util.
 const links = (v: View) => v.links.map((l) => `${l.source} > ${l.target} x${l.count}`).sort();
 const keys = (v: View) => v.nodes.map((n) => n.key).sort();
 
@@ -16,18 +16,14 @@ describe('project on the mini fixture', () => {
   it('aggregates fn calls into file-to-file weights when everything is collapsed', () => {
     const v = project(mini, new Set());
     expect(keys(v)).toEqual(
-      ['crate:0', 'crate:1', 'file:0', 'file:1', 'file:2', 'file:3', 'file:4', 'file:5'].sort(),
+      ['file:0', 'file:1', 'file:2', 'file:3', 'file:4', 'file:5'].sort(),
     );
     expect(links(v)).toEqual(
       [
-        'file:0 > crate:0 x1',
-        'file:1 > crate:1 x1',
         'file:2 > file:0 x2',
         'file:2 > file:1 x1',
         'file:2 > file:3 x1',
         'file:2 > file:4 x1',
-        'file:3 > crate:1 x3',
-        'file:4 > crate:1 x3',
         'file:4 > file:5 x1',
       ].sort(),
     );
@@ -43,45 +39,19 @@ describe('project on the mini fixture', () => {
     const v = project(mini, new Set([4]));
     expect(keys(v)).toEqual(
       [
-        'crate:0', 'crate:1',
         'file:0', 'file:1', 'file:2', 'file:3', 'file:5',
         'fn:11', 'fn:12', 'fn:13',
       ].sort(),
     );
     expect(links(v)).toEqual(
       [
-        'file:0 > crate:0 x1',
-        'file:1 > crate:1 x1',
         'file:2 > file:0 x2',
         'file:2 > file:1 x1',
         'file:2 > file:3 x1',
         'file:2 > fn:11 x1',
-        'file:3 > crate:1 x3',
-        'fn:11 > crate:1 x2',
         'fn:11 > fn:12 x1',
         'fn:11 > fn:13 x1',
-        'fn:12 > crate:1 x1',
         'fn:12 > file:5 x1',
-      ].sort(),
-    );
-  });
-
-  it('keeps crate endpoints as crate nodes regardless of expansion', () => {
-    const everything = new Set(mini.files.map((_, i) => i));
-    const v = project(mini, everything);
-    expect(v.nodes.filter((n) => n.kind === 'crate').map((n) => n.key)).toEqual([
-      'crate:0',
-      'crate:1',
-    ]);
-    expect(v.nodes.some((n) => n.kind === 'file')).toBe(false);
-    expect(links(v).filter((l) => l.includes('crate'))).toEqual(
-      [
-        'fn:1 > crate:0 x1',
-        'fn:3 > crate:1 x1',
-        'fn:9 > crate:1 x1',
-        'fn:10 > crate:1 x2',
-        'fn:11 > crate:1 x2',
-        'fn:12 > crate:1 x1',
       ].sort(),
     );
   });

@@ -8,10 +8,8 @@ type Point = readonly [x: number, y: number];
 
 interface Theme {
   ink: string;
-  inkSoft: string;
   file: string;
   fn: string;
-  crate: string;
   link: string;
   linkHot: string;
   linkDim: string;
@@ -26,10 +24,8 @@ function readTheme(): Theme {
   const v = (name: string) => s.getPropertyValue(name).trim();
   return {
     ink: v('--ink'),
-    inkSoft: v('--ink-soft'),
     file: v('--file'),
     fn: v('--fn'),
-    crate: v('--crate'),
     link: v('--link'),
     linkHot: v('--link-hot'),
     linkDim: v('--link-dim'),
@@ -77,8 +73,6 @@ export function createGraphView(
         const [start, end] = graph.files[n.id]!.fns;
         return 3 + 0.9 * Math.sqrt(end - start);
       }
-      case 'crate':
-        return 4;
     }
   };
 
@@ -101,7 +95,7 @@ export function createGraphView(
     .onRenderFramePre(beforeFrame)
     .onNodeHover((n) => {
       hovered = n;
-      root.style.cursor = n && n.kind !== 'crate' ? 'pointer' : '';
+      root.style.cursor = n ? 'pointer' : '';
     })
     .onNodeClick(clickNode)
     .onBackgroundClick(clickEmpty)
@@ -205,8 +199,6 @@ export function createGraphView(
       case 'file':
         expand(n.id);
         return;
-      case 'crate':
-        return;
       case 'fn': {
         const now = performance.now();
         if (lastFnClick?.fnId === n.id && now - lastFnClick.at < DOUBLE_CLICK_MS) {
@@ -254,7 +246,7 @@ export function createGraphView(
     ctx.globalAlpha = isDimmed(n.key) ? DIMMED_ALPHA : 1;
     ctx.beginPath();
     ctx.arc(x, y, n.r, 0, 2 * Math.PI);
-    ctx.fillStyle = n.kind === 'file' ? theme.file : n.kind === 'fn' ? theme.fn : theme.crate;
+    ctx.fillStyle = n.kind === 'file' ? theme.file : theme.fn;
     ctx.fill();
     if (n.kind === 'fn' && n.id === selected) {
       ctx.lineWidth = 1.6 / Math.min(scale, 2);
@@ -273,7 +265,7 @@ export function createGraphView(
       ctx.font = `${n.kind === 'file' ? 600 : 400} ${size}px ${theme.sans}`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'top';
-      ctx.fillStyle = n.kind === 'crate' ? theme.inkSoft : theme.ink;
+      ctx.fillStyle = theme.ink;
       ctx.fillText(nodeLabel(n), x, y + n.r + 2 / scale);
     }
     ctx.globalAlpha = 1;
@@ -321,8 +313,6 @@ export function createGraphView(
         return graph.files[n.id]!.label;
       case 'fn':
         return graph.fns[n.id]!.label;
-      case 'crate':
-        return graph.crates[n.id]!.name;
     }
   }
 
@@ -336,8 +326,6 @@ export function createGraphView(
         const f = graph.fns[n.id]!;
         return `${escapeHtml(f.label)}<div class="tip-path">${f.kind.replace('_', ' ')}, lines ${f.lines[0]}-${f.lines[1]}</div>`;
       }
-      case 'crate':
-        return `${escapeHtml(graph.crates[n.id]!.name)}<div class="tip-path">external crate</div>`;
     }
   }
 

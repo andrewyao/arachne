@@ -6,7 +6,6 @@
   --rule: #d3d8d2;
   --file: #2f6f73;
   --fn: #a8791c;
-  --crate: #8d9491;
   --link: rgba(29, 39, 42, 0.22);
   --link-hot: rgba(29, 39, 42, 0.7);
   --link-dim: rgba(29, 39, 42, 0.05);
@@ -38,7 +37,6 @@
     --rule: #2c393c;
     --file: #74b6b2;
     --fn: #e0b54a;
-    --crate: #6f7a78;
     --link: rgba(214, 221, 217, 0.18);
     --link-hot: rgba(214, 221, 217, 0.7);
     --link-dim: rgba(214, 221, 217, 0.04);

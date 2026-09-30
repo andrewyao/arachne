@@ -1,5 +1,5 @@
 // Wire format of GET /api/graph. Mirrors src/wire.rs.
-// Endpoint ids share one index space: fns are 0..fns.length, crates follow.
+// Edge endpoints are fn ids in 0..fns.length.
 
 export type FnKind = 'free' | 'method' | 'trait_decl' | 'trait_impl' | 'closure' | 'nested';
 
@@ -16,13 +16,8 @@ export interface FnNode {
   lines: [start: number, end: number];
 }
 
-export interface CrateNode {
-  name: string;
-}
-
 export interface Graph {
   files: FileNode[];
   fns: FnNode[];
-  crates: CrateNode[];
   edges: [caller: number, callee: number, count: number][];
 }
