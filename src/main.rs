@@ -1,3 +1,1 @@
-mod wire;
-
 fn main() {}
