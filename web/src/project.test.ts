@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { effectiveExpanded, project, type View } from './project';
+import { effectiveExpanded, project, type View, fileKey } from './project';
 import type { Graph } from './types';
 
 const mini: Graph = JSON.parse(
@@ -16,7 +16,7 @@ describe('project on the mini fixture', () => {
   it('aggregates fn calls into file-to-file weights when everything is collapsed', () => {
     const v = project(mini, new Set());
     expect(keys(v)).toEqual(
-      ['file:0', 'file:1', 'file:2', 'file:3', 'file:4', 'file:5'].sort(),
+      ['file:0', 'file:1', 'file:2', 'file:3', 'file:4', 'file:5', 'file:6'].sort(),
     );
     expect(links(v)).toEqual(
       [
@@ -24,7 +24,9 @@ describe('project on the mini fixture', () => {
         'file:2 > file:1 x1',
         'file:2 > file:3 x1',
         'file:2 > file:4 x1',
+        'file:2 > file:6 x1',
         'file:4 > file:5 x1',
+        'file:6 > file:1 x1',
       ].sort(),
     );
   });
@@ -39,7 +41,7 @@ describe('project on the mini fixture', () => {
     const v = project(mini, new Set([4]));
     expect(keys(v)).toEqual(
       [
-        'file:0', 'file:1', 'file:2', 'file:3', 'file:5',
+        'file:0', 'file:1', 'file:2', 'file:3', 'file:5', 'file:6',
         'fn:11', 'fn:12',
       ].sort(),
     );
@@ -48,7 +50,9 @@ describe('project on the mini fixture', () => {
         'file:2 > file:0 x2',
         'file:2 > file:1 x1',
         'file:2 > file:3 x1',
+        'file:2 > file:6 x1',
         'file:2 > fn:11 x1',
+        'file:6 > file:1 x1',
         'fn:11 > fn:12 x1',
         'fn:11 > file:5 x1',
       ].sort(),
@@ -72,10 +76,11 @@ describe('project on the mini fixture', () => {
   it('never makes a node for a file without fns', () => {
     const g: Graph = {
       ...mini,
-      files: [...mini.files, { path: 'app/src/db/mod.rs', label: 'db', fns: [14, 14] }],
+      files: [...mini.files, { path: 'app/src/db/mod.rs', label: 'db', fns: [20, 20] }],
     };
-    expect(keys(project(g, new Set())).includes('file:6')).toBe(false);
-    expect(keys(project(g, new Set([6]))).includes('file:6')).toBe(false);
+    const empty = fileKey(g.files.length - 1);
+    expect(keys(project(g, new Set())).includes(empty)).toBe(false);
+    expect(keys(project(g, new Set([g.files.length - 1]))).includes(empty)).toBe(false);
   });
 });
 
