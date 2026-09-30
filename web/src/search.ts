@@ -2,6 +2,9 @@ import type { Graph } from './types';
 
 export type Pick = { kind: 'fn'; id: number } | { kind: 'file'; id: number };
 
+/** Why a result has no node in the graph right now, if it has none. */
+export type Absence = 'hidden' | 'private' | null;
+
 interface Candidate {
   pick: Pick;
   label: string;
@@ -44,7 +47,12 @@ export function fuzzyMatch(query: string, text: string, lower = text.toLowerCase
 
 const LIMIT = 50;
 
-export function createSearch(root: HTMLElement, graph: Graph, onPick: (pick: Pick) => void): void {
+export function createSearch(
+  root: HTMLElement,
+  graph: Graph,
+  onPick: (pick: Pick) => void,
+  absence: (pick: Pick) => Absence,
+): void {
   const candidates: Candidate[] = [];
   graph.files.forEach((file, id) => {
     if (file.fns[0] === file.fns[1]) return;
@@ -122,6 +130,8 @@ export function createSearch(root: HTMLElement, graph: Graph, onPick: (pick: Pic
             label.className = 'label';
             label.append(...highlighted(r.c.label, r.m.positions));
             li.append(dot, label);
+            const why = absence(r.c.pick);
+            if (why) li.append(Object.assign(document.createElement('span'), { className: 'tag', textContent: why }));
             li.addEventListener('mousedown', (e) => {
               e.preventDefault();
               choose(i);

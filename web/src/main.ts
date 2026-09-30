@@ -7,7 +7,7 @@ import { createHiddenStore } from './hidden-store';
 import { createModeToggle } from './mode-toggle';
 import { createPanelToggle } from './panel-toggle';
 import { fileKey, fnKey } from './project';
-import { createSearch } from './search';
+import { createSearch, type Absence, type Pick } from './search';
 import type { Graph } from './types';
 import { fileHiddenKey, fnHiddenKey, hiddenKeyIndex, type HiddenTarget } from './visibility';
 
@@ -65,7 +65,14 @@ async function main() {
       mode === 'all' ? 'Every file is expanded. Switch back to Manual, or press E, to return to your own selection.' : manualHint;
   });
 
-  createSearch(document.getElementById('search')!, graph, (pick) => {
+  const absence = (pick: Pick): Absence => {
+    if (view.isUserHidden(pick)) return 'hidden';
+    return pick.kind === 'fn' && view.isContracted(pick.id) ? 'private' : null;
+  };
+  const pickResult = (pick: Pick) => {
+    // A hidden item stays hidden: the user set it aside, so picking it only reads its code.
+    if (view.isUserHidden(pick)) return openTarget(pick);
+    if (pick.kind === 'fn' && view.isContracted(pick.id)) view.setPrivateShown(graph.fns[pick.id]!.file, true);
     switch (pick.kind) {
       case 'file':
         view.expand(pick.id);
@@ -77,7 +84,8 @@ async function main() {
         view.focus(fnKey(pick.id));
         openFn(pick.id);
     }
-  });
+  };
+  createSearch(document.getElementById('search')!, graph, pickResult, absence);
 }
 
 main().catch((err: unknown) => {

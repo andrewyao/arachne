@@ -206,6 +206,16 @@ body {
   text-underline-offset: 2px;
 }
 
+.results .tag {
+  flex: none;
+  margin-left: auto;
+  padding: 0 5px;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  color: var(--ink-soft);
+  font: 11px/15px var(--sans);
+}
+
 .results .empty {
   color: var(--ink-soft);
   cursor: default;
