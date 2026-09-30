@@ -202,8 +202,35 @@ describe('private fn contraction', () => {
   it('keeps a file whose fns are all hidden as a collapsed, vacant node, even when expanded', () => {
     const g = build({ a: [['A', false]], b: [['C', true]] }, [['A', 'C']]);
     const v = visible(g, removeUserHidden(g, []), new Set());
-    expect([...v.vacant]).toEqual([1]);
+    expect([...v.vacant]).toEqual([[1, 'private']]);
     expect(nodes(g, project(g, v, new Set([0, 1])))).toEqual(['A', '[b]']);
+  });
+});
+
+describe('private counts and vacant files', () => {
+  const g = build(
+    { m: [['A', false], ['p1', true], ['p2', true], ['p3', true]], n: [['B', false], ['q', true]] },
+    [['A', 'p1'], ['A', 'p2'], ['A', 'p3'], ['B', 'q'], ['q', 'A']],
+  );
+  const counts = (hide: HiddenKey[], showPrivate: number[]) =>
+    Object.fromEntries(visible(g, removeUserHidden(g, hide), new Set(showPrivate)).privateCounts);
+
+  it('counts a file’s private fns after the user’s hiding', () => {
+    expect(counts([], [])).toEqual({ 0: 3, 1: 1 });
+    expect(counts([fnHiddenKey(g, 1)], [])).toEqual({ 0: 2, 1: 1 });
+  });
+
+  it('keeps the count while a file shows its private fns', () => {
+    expect(counts([fnHiddenKey(g, 1)], [0])).toEqual({ 0: 2, 1: 1 });
+    expect(counts([], [0, 1])).toEqual({ 0: 3, 1: 1 });
+  });
+
+  it('says whether the user or contraction emptied a file', () => {
+    const f = build({ a: [['A', false]], b: [['x', true], ['y', false]] }, [['A', 'x']]);
+    const vacant = (hide: HiddenKey[]) => [...visible(f, removeUserHidden(f, hide), new Set()).vacant];
+    expect(vacant([fnHiddenKey(f, 2)])).toEqual([[1, 'private']]);
+    expect(vacant([fnHiddenKey(f, 1), fnHiddenKey(f, 2)])).toEqual([[1, 'hidden']]);
+    expect(visible(f, removeUserHidden(f, [fnHiddenKey(f, 1), fnHiddenKey(f, 2)]), new Set()).privateCounts.get(1)).toBeUndefined();
   });
 });
 

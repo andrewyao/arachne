@@ -223,8 +223,16 @@ export interface Visible {
   hiddenFns: ReadonlySet<number>;
   /** Private fns contracted away. Disjoint from the user-hidden fns. */
   contracted: ReadonlySet<number>;
-  /** Files with fns, none of them visible. They stay as a collapsed node, drawn dimmed. */
-  vacant: ReadonlySet<number>;
+  /**
+   * Files with fns, none of them visible. They stay as a collapsed node, drawn dimmed. `hidden`
+   * when the user's hidden list emptied the file, `private` when contraction is involved.
+   */
+  vacant: ReadonlyMap<number, 'hidden' | 'private'>;
+  /**
+   * Per file, the private fns its toggle controls, not counting user-hidden fns: those contracted
+   * now, or for a file showing its private fns, those that hiding them again would contract.
+   */
+  privateCounts: ReadonlyMap<number, number>;
   edges: Edge[];
 }
 
@@ -232,12 +240,30 @@ export function visible(g: Graph, pruned: Pruned, showPrivate: ReadonlySet<numbe
   const contracted = hiddenFns(g, showPrivate);
   for (const fn of pruned.fns) contracted.delete(fn);
   const hidden = new Set([...pruned.fns, ...contracted]);
-  const vacant = new Set<number>();
+  const vacant = new Map<number, 'hidden' | 'private'>();
   g.files.forEach((file, id) => {
     const [start, end] = file.fns;
     if (start === end || pruned.files.has(id)) return;
-    for (let fn = start; fn < end; fn++) if (!hidden.has(fn)) return;
-    vacant.add(id);
+    let byUser = true;
+    for (let fn = start; fn < end; fn++) {
+      if (!hidden.has(fn)) return;
+      byUser &&= pruned.fns.has(fn);
+    }
+    vacant.set(id, byUser ? 'hidden' : 'private');
   });
-  return { hiddenFiles: pruned.files, hiddenFns: hidden, contracted, vacant, edges: contract(pruned.edges, contracted) };
+
+  const privateCounts = new Map<number, number>();
+  const tally = (fns: Iterable<number>, only?: number) => {
+    for (const fn of fns) {
+      const file = g.fns[fn]!.file;
+      if ((only === undefined || file === only) && !pruned.fns.has(fn)) privateCounts.set(file, (privateCounts.get(file) ?? 0) + 1);
+    }
+  };
+  tally(contracted);
+  for (const file of showPrivate) {
+    const others = new Set(showPrivate);
+    others.delete(file);
+    tally(hiddenFns(g, others), file);
+  }
+  return { hiddenFiles: pruned.files, hiddenFns: hidden, contracted, vacant, privateCounts, edges: contract(pruned.edges, contracted) };
 }

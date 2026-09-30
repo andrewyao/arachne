@@ -14,7 +14,6 @@ import {
 } from './project';
 import type { Graph } from './types';
 import {
-  hiddenFns,
   hiddenKeyIndex,
   removeUserHidden,
   visible,
@@ -123,11 +122,6 @@ export function createGraphView(root: HTMLElement, graph: Graph, events: GraphVi
   let pruned = removeUserHidden(graph, [], keyIndex);
   const showPrivate = new Set<number>();
   let vis: Visible = visible(graph, pruned, showPrivate);
-  const privateCounts = new Map<number, number>();
-  for (const fn of hiddenFns(graph, new Set())) {
-    const file = graph.fns[fn]!.file;
-    privateCounts.set(file, (privateCounts.get(file) ?? 0) + 1);
-  }
   // The files drawn as fns. A snapshot, so sync() can diff the old view against the new one.
   let expanded: ReadonlySet<number> = new Set();
   let drawn = new Set<NodeKey>();
@@ -604,7 +598,7 @@ export function createGraphView(root: HTMLElement, graph: Graph, events: GraphVi
 
     function placeHullLabel(fileId: number, x: number, y: number) {
       const text = graph.files[fileId]!.label;
-      const count = privateCounts.get(fileId) ?? 0;
+      const count = vis.privateCounts.get(fileId) ?? 0;
       if (!count) return place({ text, x, y, px: 12, weight: 600, color: theme.file, above: true, dimmed: false });
       const chipText = `${count} private · ${showPrivate.has(fileId) ? 'hide' : 'show'}`;
       const labelW = textWidth(text, 12, 600);
@@ -671,9 +665,11 @@ export function createGraphView(root: HTMLElement, graph: Graph, events: GraphVi
     switch (n.kind) {
       case 'file': {
         const f = graph.files[n.id]!;
-        const vacant = vis.vacant.has(n.id)
-          ? '<div class="tip-path">Every fn is hidden. Right-click to show its private fns.</div>'
-          : '';
+        const vacant = {
+          hidden: '<div class="tip-path">All fns hidden by you.</div>',
+          private: '<div class="tip-path">Every fn is hidden. Right-click to show its private fns.</div>',
+          none: '',
+        }[vis.vacant.get(n.id) ?? 'none'];
         return `${escapeHtml(f.label)}<div class="tip-path">${escapeHtml(f.path)}</div>${vacant}`;
       }
       case 'fn': {
@@ -692,7 +688,7 @@ export function createGraphView(root: HTMLElement, graph: Graph, events: GraphVi
     setHidden,
     setPrivateShown,
     isPrivateShown: (fileId) => showPrivate.has(fileId),
-    privateCount: (fileId) => privateCounts.get(fileId) ?? 0,
+    privateCount: (fileId) => vis.privateCounts.get(fileId) ?? 0,
     isUserHidden: (t) => (t.kind === 'file' ? pruned.files : pruned.fns).has(t.id),
     isContracted: (fnId) => vis.contracted.has(fnId),
   };
