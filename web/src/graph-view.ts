@@ -4,9 +4,10 @@ import { LabelGrid, type Box } from './labels';
 import { clusterForce } from './layout';
 import { effectiveExpanded, fileKey, fnKey, project, type ExpandMode, type NodeKey, type ViewNode } from './project';
 import type { Graph } from './types';
+import { removeUserHidden, visible } from './visibility';
 
 type SimNode = ViewNode & { x?: number; y?: number; vx?: number; vy?: number; r: number };
-type SimLink = { source: NodeKey | SimNode; target: NodeKey | SimNode; count: number };
+type SimLink = { source: NodeKey | SimNode; target: NodeKey | SimNode; count: number; via: boolean };
 type Point = readonly [x: number, y: number];
 
 interface Theme {
@@ -195,7 +196,7 @@ export function createGraphView(
   }
 
   function refresh() {
-    const view = project(graph, expanded);
+    const view = project(graph, visible(graph, removeUserHidden(graph, []), new Set()), expanded);
     const nodes = view.nodes.map((vn) => {
       let obj = objects.get(vn.key);
       if (!obj) {
