@@ -1,5 +1,6 @@
 //! Per-language knowledge. Supporting a new language means adding a `Language` to `LANGUAGES`.
 
+use std::collections::HashSet;
 use std::path::Path;
 use std::process::Command;
 
@@ -52,7 +53,7 @@ pub enum FnName {
 }
 
 /// 0-based line and column, ordered by line then column.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Pos {
     pub line: u32,
     pub col: u32,
@@ -76,4 +77,6 @@ impl Span {
 pub struct SourceSpans {
     /// Test fns and test-only modules. Everything inside is excluded.
     pub tests: Vec<Span>,
+    /// Name starts of fns the language considers private. Any other fn is public.
+    pub private_fns: HashSet<Pos>,
 }

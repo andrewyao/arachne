@@ -29,6 +29,7 @@ pub struct Func {
     pub kind: FnKind,
     /// 1-based, inclusive.
     pub lines: (u32, u32),
+    pub private: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,6 +80,7 @@ impl CallGraph {
                         FnKind::Nested { .. } => wire::FnKind::Nested,
                     },
                     lines: f.lines,
+                    private: f.private,
                 })
                 .collect(),
             edges: (0..fn_count)
@@ -136,34 +138,44 @@ pub fn build(
         let mut label_inputs = Vec::new();
         let mut kinds = Vec::new();
         let mut lines = Vec::new();
+        let mut private = Vec::new();
         let mut local_of_entry = vec![None; doc.entries.len()];
         for (e, entry) in doc.entries.iter().enumerate() {
             let parent = doc.parents[e].and_then(|p| local_of_entry[p]);
-            let (input, kind) = match (&entry.what, parent) {
-                (What::Def { name, .. }, None) => {
-                    (FnLabelInput::Named(name), FnKind::Named(name.clone()))
-                }
-                (What::Def { name, .. }, Some(p)) => (
+            let What::Def {
+                name,
+                private: is_private,
+                ..
+            } = &entry.what
+            else {
+                continue;
+            };
+            let (input, kind) = match parent {
+                None => (FnLabelInput::Named(name), FnKind::Named(name.clone())),
+                Some(p) => (
                     FnLabelInput::Nested { parent: p, name },
                     FnKind::Nested {
                         parent: FnId(first + p as u32),
                         name: name.clone(),
                     },
                 ),
-                (What::Excluded, _) => continue,
             };
             local_of_entry[e] = Some(label_inputs.len());
             label_inputs.push(input);
             kinds.push(kind);
             lines.push((entry.first_line + 1, entry.span.end.line + 1));
+            private.push(*is_private);
         }
         let fn_labels = labels::fn_labels(&file_label, &label_inputs);
-        for ((label, kind), lines) in fn_labels.into_iter().zip(kinds).zip(lines) {
+        for (((label, kind), lines), private) in
+            fn_labels.into_iter().zip(kinds).zip(lines).zip(private)
+        {
             fns.push(Func {
                 file: FileId(file_idx as u32),
                 label,
                 kind,
                 lines,
+                private,
             });
         }
         doc.fn_of_entry = local_of_entry
@@ -302,6 +314,7 @@ enum What {
     Def {
         symbol: String,
         name: FnName,
+        private: bool,
     },
     /// A test region. Occurrences inside it belong to no fn.
     Excluded,
@@ -360,6 +373,7 @@ impl<'a> Doc<'a> {
                 what: What::Def {
                     symbol: occ.symbol.clone(),
                     name: (lang.fn_name)(parents, name),
+                    private: spans.private_fns.contains(&range_start(&occ.range)),
                 },
             });
             package.get_or_insert(symbol.package);
@@ -525,6 +539,7 @@ fn c() {}
             ],
             SourceSpans {
                 tests: vec![span((2, 0), (6, 1))],
+                ..Default::default()
             },
         );
         let labels: Vec<&str> = g.fns.iter().map(|f| f.label.as_str()).collect();

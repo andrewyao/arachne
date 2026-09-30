@@ -101,19 +101,63 @@ fn source_spans(source: &str) -> SourceSpans {
         .parse(source, None)
         .expect("parser has a language and no timeout");
     let mut spans = SourceSpans::default();
-    let mut stack = vec![tree.root_node()];
-    while let Some(node) = stack.pop() {
-        if matches!(node.kind(), "function_item" | "mod_item" | "impl_item")
+    let mut stack = vec![(tree.root_node(), Scope::Module)];
+    while let Some((node, scope)) = stack.pop() {
+        let kind = node.kind();
+        if matches!(kind, "function_item" | "mod_item" | "impl_item")
             && has_attr(node, source, is_test_attr)
         {
             spans.tests.push(span(node));
             continue;
         }
+        if matches!(kind, "function_item" | "function_signature_item")
+            && is_private(node, scope, source)
+        {
+            if let Some(name) = node.child_by_field_name("name") {
+                spans.private_fns.insert(span(name).start);
+            }
+        }
+        let inner = match (scope, kind) {
+            (Scope::FnBody, _) | (_, "function_item") => Scope::FnBody,
+            (_, "impl_item") if node.child_by_field_name("trait").is_some() => Scope::TraitImpl,
+            (_, "impl_item") => Scope::Impl,
+            (_, "trait_item") => Scope::Trait,
+            (_, "mod_item") => Scope::Module,
+            _ => scope,
+        };
         let mut cursor = node.walk();
-        stack.extend(node.named_children(&mut cursor));
+        stack.extend(node.named_children(&mut cursor).map(|c| (c, inner)));
     }
     spans.tests.sort_by_key(|s| s.start);
     spans
+}
+
+/// Where an item sits, as far as its visibility is concerned.
+#[derive(Debug, Clone, Copy)]
+enum Scope {
+    Module,
+    Impl,
+    /// Methods are reached through the trait and can't carry a modifier.
+    TraitImpl,
+    Trait,
+    /// Anything inside a fn body, however deep.
+    FnBody,
+}
+
+fn is_private(item: Node, scope: Scope, source: &str) -> bool {
+    match scope {
+        Scope::FnBody => true,
+        Scope::TraitImpl | Scope::Trait => false,
+        Scope::Module | Scope::Impl => {
+            let mut cursor = item.walk();
+            let modifier = item
+                .named_children(&mut cursor)
+                .find(|c| c.kind() == "visibility_modifier");
+            modifier.is_none_or(|m| {
+                text(m, source).split_whitespace().collect::<String>() == "pub(self)"
+            })
+        }
+    }
 }
 
 fn span(node: Node) -> Span {
@@ -198,6 +242,61 @@ impl Loader {
         assert_eq!(
             lines(&spans.tests),
             vec![(6, 6), (9, 9), (11, 13), (18, 18)]
+        );
+    }
+
+    #[test]
+    fn private_fns_by_visibility_and_scope() {
+        let src = r#"
+fn plain() {
+    fn nested() {}
+    let f = || { pub fn in_closure() {} };
+}
+pub fn public() {}
+pub(crate) fn krate() {}
+pub(super) fn sup() {}
+pub(in crate::a) fn in_path() {}
+pub(self) fn slf() {}
+pub( self ) fn slf_spaced() {}
+impl Photo {
+    fn method() {}
+    pub fn pub_method() {}
+    pub(self) fn self_method() {}
+}
+impl Shape for Photo {
+    fn trait_impl() {}
+}
+trait Shape {
+    fn decl();
+    fn provided() {}
+}
+mod inner {
+    fn in_mod() {}
+    pub fn pub_in_mod() {}
+}
+"#;
+        let lines: Vec<&str> = src.lines().collect();
+        let mut private: Vec<&str> = source_spans(src)
+            .private_fns
+            .iter()
+            .map(|p| {
+                let rest = &lines[p.line as usize][p.col as usize..];
+                &rest[..rest.find('(').unwrap()]
+            })
+            .collect();
+        private.sort();
+        assert_eq!(
+            private,
+            [
+                "in_closure",
+                "in_mod",
+                "method",
+                "nested",
+                "plain",
+                "self_method",
+                "slf",
+                "slf_spaced"
+            ]
         );
     }
 

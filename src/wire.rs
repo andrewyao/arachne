@@ -29,6 +29,8 @@ pub struct Func {
     pub kind: FnKind,
     /// 1-based, inclusive.
     pub lines: (u32, u32),
+    /// Unreachable from outside its module, by the language's rules. Rust: no modifier or `pub(self)`, or nested in a fn body.
+    pub private: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
