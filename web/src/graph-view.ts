@@ -14,7 +14,6 @@ import {
 } from './project';
 import type { Graph } from './types';
 import {
-  hiddenKeyIndex,
   removeUserHidden,
   visible,
   type HiddenKey,
@@ -107,7 +106,8 @@ export interface GraphView {
   /** Private fns in the file that are contracted away unless the file shows its private fns. */
   privateCount(fileId: number): number;
   isUserHidden(target: HiddenTarget): boolean;
-  isContracted(fnId: number): boolean;
+  /** A contracted private fn, or a file emptied by contraction. */
+  isPrivateHidden(target: HiddenTarget): boolean;
 }
 
 export interface GraphViewEvents {
@@ -115,11 +115,15 @@ export interface GraphViewEvents {
   onContextMenu(target: HiddenTarget, e: MouseEvent): void;
 }
 
-export function createGraphView(root: HTMLElement, graph: Graph, events: GraphViewEvents): GraphView {
+export function createGraphView(
+  root: HTMLElement,
+  graph: Graph,
+  hidden: { index: ReadonlyMap<HiddenKey, HiddenTarget>; keys: Iterable<HiddenKey> },
+  events: GraphViewEvents,
+): GraphView {
   const manual = new Set<number>();
   let mode: ExpandMode = 'manual';
-  const keyIndex = hiddenKeyIndex(graph);
-  let pruned = removeUserHidden(graph, [], keyIndex);
+  let pruned = removeUserHidden(graph, hidden.keys, hidden.index);
   const showPrivate = new Set<number>();
   let vis: Visible = visible(graph, pruned, showPrivate);
   // The files drawn as fns. A snapshot, so sync() can diff the old view against the new one.
@@ -316,7 +320,7 @@ export function createGraphView(root: HTMLElement, graph: Graph, events: GraphVi
   }
 
   function setHidden(keys: Iterable<HiddenKey>) {
-    pruned = removeUserHidden(graph, keys, keyIndex);
+    pruned = removeUserHidden(graph, keys, hidden.index);
     vis = visible(graph, pruned, showPrivate);
     sync();
   }
@@ -690,7 +694,7 @@ export function createGraphView(root: HTMLElement, graph: Graph, events: GraphVi
     isPrivateShown: (fileId) => showPrivate.has(fileId),
     privateCount: (fileId) => vis.privateCounts.get(fileId) ?? 0,
     isUserHidden: (t) => (t.kind === 'file' ? pruned.files : pruned.fns).has(t.id),
-    isContracted: (fnId) => vis.contracted.has(fnId),
+    isPrivateHidden: (t) => (t.kind === 'fn' ? vis.contracted.has(t.id) : vis.vacant.get(t.id) === 'private'),
   };
 }
 

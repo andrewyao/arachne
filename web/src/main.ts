@@ -27,8 +27,9 @@ async function main() {
     void panel.show(fnId);
   };
   const hidden = createHiddenStore(graph.project);
+  const keyIndex = hiddenKeyIndex(graph);
   const menu = createContextMenu();
-  const view = createGraphView(document.getElementById('graph')!, graph, {
+  const view = createGraphView(document.getElementById('graph')!, graph, { index: keyIndex, keys: hidden.keys() }, {
     onOpenFn: openFn,
     onContextMenu(target, e) {
       const key = target.kind === 'file' ? fileHiddenKey(graph, target.id) : fnHiddenKey(graph, target.id);
@@ -48,14 +49,13 @@ async function main() {
       menu.open(e.clientX, e.clientY, title, items);
     },
   });
-  view.setHidden(hidden.keys());
   hidden.subscribe((keys) => view.setHidden(keys));
   const openTarget = (t: HiddenTarget) => {
     if (t.kind === 'fn') return openFn(t.id);
     toggle.open();
     void panel.showFile(t.id);
   };
-  createHiddenList(document.getElementById('hidden')!, graph, hidden, hiddenKeyIndex(graph), openTarget);
+  createHiddenList(document.getElementById('hidden')!, graph, hidden, keyIndex, openTarget);
 
   const hint = document.getElementById('hint')!;
   const manualHint = hint.textContent;
@@ -67,12 +67,12 @@ async function main() {
 
   const absence = (pick: Pick): Absence => {
     if (view.isUserHidden(pick)) return 'hidden';
-    return pick.kind === 'fn' && view.isContracted(pick.id) ? 'private' : null;
+    return view.isPrivateHidden(pick) ? 'private' : null;
   };
   const pickResult = (pick: Pick) => {
     // A hidden item stays hidden: the user set it aside, so picking it only reads its code.
     if (view.isUserHidden(pick)) return openTarget(pick);
-    if (pick.kind === 'fn' && view.isContracted(pick.id)) view.setPrivateShown(graph.fns[pick.id]!.file, true);
+    if (view.isPrivateHidden(pick)) view.setPrivateShown(pick.kind === 'file' ? pick.id : graph.fns[pick.id]!.file, true);
     switch (pick.kind) {
       case 'file':
         view.expand(pick.id);
