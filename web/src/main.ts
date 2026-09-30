@@ -2,13 +2,14 @@ import './style.css';
 import { createCodePanel } from './code-panel';
 import { createContextMenu, type MenuItem } from './context-menu';
 import { createGraphView } from './graph-view';
+import { createHiddenList } from './hidden-list';
 import { createHiddenStore } from './hidden-store';
 import { createModeToggle } from './mode-toggle';
 import { createPanelToggle } from './panel-toggle';
 import { fileKey, fnKey } from './project';
 import { createSearch } from './search';
 import type { Graph } from './types';
-import { fileHiddenKey, fnHiddenKey } from './visibility';
+import { fileHiddenKey, fnHiddenKey, hiddenKeyIndex, type HiddenTarget } from './visibility';
 
 async function main() {
   const res = await fetch('/api/graph');
@@ -49,6 +50,12 @@ async function main() {
   });
   view.setHidden(hidden.keys());
   hidden.subscribe((keys) => view.setHidden(keys));
+  const openTarget = (t: HiddenTarget) => {
+    if (t.kind === 'fn') return openFn(t.id);
+    toggle.open();
+    void panel.showFile(t.id);
+  };
+  createHiddenList(document.getElementById('hidden')!, graph, hidden, hiddenKeyIndex(graph), openTarget);
 
   const hint = document.getElementById('hint')!;
   const manualHint = hint.textContent;

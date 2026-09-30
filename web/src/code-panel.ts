@@ -48,6 +48,8 @@ const extensions: Extension[] = [
 
 export interface CodePanel {
   show(fnId: number): Promise<void>;
+  /** The whole file from its first line, with no range shaded. */
+  showFile(fileId: number): Promise<void>;
 }
 
 export function createCodePanel(root: HTMLElement, graph: Graph): CodePanel {
@@ -78,37 +80,51 @@ export function createCodePanel(root: HTMLElement, graph: Graph): CodePanel {
   let shownFile: number | null = null;
   let latest = 0;
 
+  // `range` null shows the file from the top with nothing shaded.
+  async function display(fileId: number, title: string, subtitle: string, range: Range | null) {
+    const file = graph.files[fileId]!;
+    const request = ++latest;
+    if (!head.isConnected) root.replaceChildren(head, body);
+    fnLine.textContent = title;
+    pathLine.textContent = subtitle;
+
+    if (shownFile !== fileId) {
+      let text: string;
+      try {
+        text = await source(fileId);
+      } catch (err) {
+        if (request !== latest) return;
+        shownFile = null;
+        root.replaceChildren(head, el('p', 'panel-error', `Could not load ${file.path}: ${err instanceof Error ? err.message : String(err)}.`));
+        return;
+      }
+      if (request !== latest) return;
+      if (!body.isConnected) root.replaceChildren(head, body);
+      view.setState(EditorState.create({ doc: text, extensions }));
+      shownFile = fileId;
+    }
+
+    const doc = view.state.doc;
+    const startLine = doc.line(Math.min(Math.max(1, range?.[0] ?? 1), doc.lines));
+    view.dispatch({
+      effects: [
+        setRange.of(range ?? [0, -1]),
+        EditorView.scrollIntoView(startLine.from, { y: range ? 'center' : 'start' }),
+      ],
+    });
+  }
+
   return {
     async show(fnId) {
       const fn = graph.fns[fnId];
       if (!fn) return;
       const file = graph.files[fn.file]!;
-      const request = ++latest;
-      if (!head.isConnected) root.replaceChildren(head, body);
-      fnLine.textContent = fn.label;
-      pathLine.textContent = `${file.path}:${fn.lines[0]}-${fn.lines[1]}`;
-
-      if (shownFile !== fn.file) {
-        let text: string;
-        try {
-          text = await source(fn.file);
-        } catch (err) {
-          if (request !== latest) return;
-          shownFile = null;
-          root.replaceChildren(head, el('p', 'panel-error', `Could not load ${file.path}: ${err instanceof Error ? err.message : String(err)}.`));
-          return;
-        }
-        if (request !== latest) return;
-        if (!body.isConnected) root.replaceChildren(head, body);
-        view.setState(EditorState.create({ doc: text, extensions }));
-        shownFile = fn.file;
-      }
-
-      const doc = view.state.doc;
-      const startLine = doc.line(Math.min(Math.max(1, fn.lines[0]), doc.lines));
-      view.dispatch({
-        effects: [setRange.of(fn.lines), EditorView.scrollIntoView(startLine.from, { y: 'center' })],
-      });
+      await display(fn.file, fn.label, `${file.path}:${fn.lines[0]}-${fn.lines[1]}`, fn.lines);
+    },
+    async showFile(fileId) {
+      const file = graph.files[fileId];
+      if (!file) return;
+      await display(fileId, file.label, file.path, null);
     },
   };
 }
