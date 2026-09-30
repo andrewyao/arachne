@@ -1,11 +1,14 @@
 import './style.css';
 import { createCodePanel } from './code-panel';
+import { createContextMenu, type MenuItem } from './context-menu';
 import { createGraphView } from './graph-view';
+import { createHiddenStore } from './hidden-store';
 import { createModeToggle } from './mode-toggle';
 import { createPanelToggle } from './panel-toggle';
 import { fileKey, fnKey } from './project';
 import { createSearch } from './search';
 import type { Graph } from './types';
+import { fileHiddenKey, fnHiddenKey } from './visibility';
 
 async function main() {
   const res = await fetch('/api/graph');
@@ -22,10 +25,30 @@ async function main() {
     toggle.open();
     void panel.show(fnId);
   };
+  const hidden = createHiddenStore(graph.project);
+  const menu = createContextMenu();
   const view = createGraphView(document.getElementById('graph')!, graph, {
     onOpenFn: openFn,
-    onContextMenu: () => {},
+    onContextMenu(target, e) {
+      const key = target.kind === 'file' ? fileHiddenKey(graph, target.id) : fnHiddenKey(graph, target.id);
+      const items: MenuItem[] = [
+        { label: target.kind === 'file' ? 'Hide file' : 'Hide function', run: () => hidden.add(key) },
+      ];
+      const count = target.kind === 'file' ? view.privateCount(target.id) : 0;
+      if (count > 0) {
+        const shown = view.isPrivateShown(target.id);
+        items.push({
+          label: shown ? 'Hide private fns' : 'Show private fns',
+          detail: String(count),
+          run: () => view.setPrivateShown(target.id, !shown),
+        });
+      }
+      const title = target.kind === 'file' ? graph.files[target.id]!.label : graph.fns[target.id]!.label;
+      menu.open(e.clientX, e.clientY, title, items);
+    },
   });
+  view.setHidden(hidden.keys());
+  hidden.subscribe((keys) => view.setHidden(keys));
 
   const hint = document.getElementById('hint')!;
   const manualHint = hint.textContent;

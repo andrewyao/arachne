@@ -409,6 +409,62 @@ body {
   color: var(--select);
 }
 
+/* context menu */
+
+.context-menu {
+  position: fixed;
+  z-index: 10;
+  min-width: 200px;
+  max-width: min(360px, calc(100vw - 16px));
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+}
+
+.context-menu[hidden] {
+  display: none;
+}
+
+.context-title {
+  margin: 0;
+  padding: 4px 8px 6px;
+  border-bottom: 1px solid var(--rule);
+  margin-bottom: 4px;
+  font: 600 12px var(--mono);
+  color: var(--ink-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-menu button {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--ink);
+  font: 13px var(--sans);
+  text-align: left;
+  cursor: pointer;
+}
+
+.context-menu button:hover,
+.context-menu button:focus-visible {
+  background: var(--range);
+  outline: none;
+}
+
+.context-detail {
+  color: var(--ink-soft);
+  font-family: var(--mono);
+}
+
 /* canvas tooltip from force-graph */
 
 .float-tooltip-kap {
