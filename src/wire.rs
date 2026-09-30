@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Graph {
+    /// Canonical absolute path of the analyzed root. Identifies the project across sessions.
+    pub project: String,
     /// Index is the FileId. Sorted by path.
     pub files: Vec<File>,
     /// Index is the FnId. Grouped by file, sorted by start line within a file.

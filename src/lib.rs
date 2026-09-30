@@ -13,6 +13,7 @@ use std::path::Path;
 use anyhow::Context;
 
 /// Indexes (or reuses the cached index for) `root` and builds its call graph.
+/// `root` must be canonical, since it becomes the graph's `project` identity.
 pub fn analyze(root: &Path, index_override: Option<&Path>) -> anyhow::Result<wire::Graph> {
     let lang = lang::detect(root)
         .with_context(|| format!("no supported language detected in {}", root.display()))?;
@@ -34,5 +35,5 @@ pub fn analyze(root: &Path, index_override: Option<&Path>) -> anyhow::Result<wir
             fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
         spans.insert(doc.relative_path.clone(), (lang.source_spans)(&source));
     }
-    Ok(graph::build(&index, &spans, &workspace, lang).to_wire())
+    Ok(graph::build(&index, &spans, &workspace, lang).to_wire(root.to_string_lossy().into_owned()))
 }

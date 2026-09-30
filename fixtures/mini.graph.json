@@ -1,4 +1,5 @@
 {
+  "project": "",
   "files": [
     { "path": "app/src/album.rs", "label": "album", "fns": [0, 3] },
     { "path": "app/src/db/util.rs", "label": "db/util", "fns": [3, 4] },

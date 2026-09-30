@@ -14,9 +14,13 @@ export interface FnNode {
   label: string;
   kind: FnKind;
   lines: [start: number, end: number];
+  /** Unreachable from outside its module, by the language's rules. */
+  private: boolean;
 }
 
 export interface Graph {
+  /** Canonical absolute path of the analyzed root. */
+  project: string;
   files: FileNode[];
   fns: FnNode[];
   edges: [caller: number, callee: number, count: number][];

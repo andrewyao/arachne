@@ -54,9 +54,10 @@ impl CallGraph {
         &self.out[self.out_offsets[i] as usize..self.out_offsets[i + 1] as usize]
     }
 
-    pub fn to_wire(&self) -> wire::Graph {
+    pub fn to_wire(&self, project: String) -> wire::Graph {
         let fn_count = self.fns.len() as u32;
         wire::Graph {
+            project,
             files: self
                 .files
                 .iter()
@@ -462,7 +463,7 @@ mod tests {
         let mut index = Index::new();
         index.documents = vec![doc];
         let spans = HashMap::from([("src/ui.rs".to_string(), spans)]);
-        build(&index, &spans, &HashSet::from(["app".to_string()]), &RUST).to_wire()
+        build(&index, &spans, &HashSet::from(["app".to_string()]), &RUST).to_wire(String::new())
     }
 
     fn edges_by_label(g: &wire::Graph) -> Vec<(&str, &str, u32)> {

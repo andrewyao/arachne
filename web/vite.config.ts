@@ -8,6 +8,7 @@ const FIXTURE_ROOT = process.env.ARACHNE_ROOT ?? resolve(import.meta.dirname, '.
 
 // Stands in for the Rust server during `npm run dev`. Serves the mini fixture
 // unless ARACHNE_GRAPH / ARACHNE_ROOT point at another graph and source tree.
+// Like the server, it reports the source root as the graph's `project`.
 function fixtureApi(): Plugin {
   return {
     name: 'arachne-fixture-api',
@@ -15,8 +16,10 @@ function fixtureApi(): Plugin {
       server.middlewares.use(async (req, res, next) => {
         const url = req.url ?? '';
         if (url === '/api/graph') {
+          const graph: Graph = JSON.parse(await readFile(FIXTURE_GRAPH, 'utf8'));
+          graph.project = FIXTURE_ROOT;
           res.setHeader('content-type', 'application/json');
-          res.end(await readFile(FIXTURE_GRAPH));
+          res.end(JSON.stringify(graph));
           return;
         }
         const m = /^\/api\/source\/(\d+)$/.exec(url);
