@@ -242,7 +242,12 @@ export function createGraphView(root: HTMLElement, graph: Graph, events: GraphVi
   refresh();
   // Lets the browser verification script find node screen positions.
   if (import.meta.env.DEV) {
-    Object.assign(window, { __arachneGraph: fg, __arachneLabels: () => placedLabels, __arachneChips: () => chips });
+    Object.assign(window, {
+      __arachneGraph: fg,
+      __arachneLabels: () => placedLabels,
+      __arachneChips: () => chips,
+      __arachneShowPrivate: setPrivateShown,
+    });
   }
 
   function fileOfFn(n: SimNode): number | undefined {
@@ -599,7 +604,6 @@ export function createGraphView(root: HTMLElement, graph: Graph, events: GraphVi
     ctx.globalAlpha = 1;
     placedLabels = grid.placed;
 
-    // The label above an expanded file, followed by its private-fn chip when it has any.
     function placeHullLabel(fileId: number, x: number, y: number) {
       const text = graph.files[fileId]!.label;
       const count = privateCounts.get(fileId) ?? 0;
