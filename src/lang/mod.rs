@@ -18,8 +18,6 @@ pub struct Language {
     pub source_ext: &'static str,
     /// Root-level file hashed alongside the sources.
     pub lockfile: &'static str,
-    /// Packages merged into the single `std` crate node.
-    pub is_std_package: fn(package: &str) -> bool,
     /// Interprets a callable symbol from the descriptors enclosing its method descriptor.
     pub fn_name: fn(parents: &[Descriptor], name: &str) -> FnName,
     /// Path components ending in the module name, e.g. `app/src/db/mod.rs` -> `[app, src, db]`.

@@ -11,16 +11,11 @@ fn mini_fixture_matches_golden_graph() {
         serde_json::from_str(&std::fs::read_to_string(fixtures.join("mini.graph.json")).unwrap())
             .unwrap();
 
-    let label = |g: &Graph, id: u32| {
-        g.fns.get(id as usize).map_or_else(
-            || g.crates[id as usize - g.fns.len()].name.clone(),
-            |f| f.label.clone(),
-        )
-    };
     let readable = |g: &Graph| -> Vec<String> {
+        let label = |id: u32| &g.fns[id as usize].label;
         g.edges
             .iter()
-            .map(|&(a, b, n)| format!("{} -> {} x{n}", label(g, a), label(g, b)))
+            .map(|&(a, b, n)| format!("{} -> {} x{n}", label(a), label(b)))
             .collect()
     };
     assert_eq!(readable(&got), readable(&want), "edges by label");

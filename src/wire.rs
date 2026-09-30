@@ -1,7 +1,4 @@
 //! JSON served at `GET /api/graph`. Mirrored by `web/src/types.ts`.
-//!
-//! Endpoint ids share one index space: fns occupy `0..fns.len()`,
-//! crates occupy `fns.len()..fns.len() + crates.len()`.
 
 use serde::{Deserialize, Serialize};
 
@@ -11,9 +8,7 @@ pub struct Graph {
     pub files: Vec<File>,
     /// Index is the FnId. Grouped by file, sorted by start line within a file.
     pub fns: Vec<Func>,
-    /// Endpoint id is `fns.len() + index`. Sorted by name.
-    pub crates: Vec<Crate>,
-    /// `[caller fn id, callee endpoint id, call count]`, sorted, unique per pair.
+    /// `[caller fn id, callee fn id, call count]`, sorted, unique per pair.
     pub edges: Vec<(u32, u32, u32)>,
 }
 
@@ -45,9 +40,4 @@ pub enum FnKind {
     TraitImpl,
     Closure,
     Nested,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Crate {
-    pub name: String,
 }

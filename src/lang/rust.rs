@@ -15,7 +15,6 @@ pub const RUST: Language = Language {
     workspace_packages,
     source_ext: "rs",
     lockfile: "Cargo.lock",
-    is_std_package: |package| matches!(package, "std" | "core" | "alloc"),
     fn_name,
     module_path,
     source_spans,

@@ -14,15 +14,6 @@ use crate::wire;
 pub struct FileId(pub u32);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct FnId(pub u32);
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct CrateId(pub u32);
-
-/// Callee side of an edge. Callers are always fns.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum Endpoint {
-    Fn(FnId),
-    Crate(CrateId),
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct File {
@@ -52,25 +43,19 @@ pub struct CallGraph {
     pub files: Vec<File>,
     /// Grouped by file, sorted by position within a file.
     pub fns: Vec<Func>,
-    /// Sorted by name.
-    pub crates: Vec<String>,
     /// `out[out_offsets[f]..out_offsets[f + 1]]` are fn `f`'s callees with call counts.
     out_offsets: Vec<u32>,
-    out: Vec<(Endpoint, u32)>,
+    out: Vec<(FnId, u32)>,
 }
 
 impl CallGraph {
-    pub fn callees(&self, f: FnId) -> &[(Endpoint, u32)] {
+    pub fn callees(&self, f: FnId) -> &[(FnId, u32)] {
         let i = f.0 as usize;
         &self.out[self.out_offsets[i] as usize..self.out_offsets[i + 1] as usize]
     }
 
     pub fn to_wire(&self) -> wire::Graph {
         let fn_count = self.fns.len() as u32;
-        let endpoint = |e: Endpoint| match e {
-            Endpoint::Fn(f) => f.0,
-            Endpoint::Crate(c) => fn_count + c.0,
-        };
         wire::Graph {
             files: self
                 .files
@@ -98,23 +83,16 @@ impl CallGraph {
                     lines: f.lines,
                 })
                 .collect(),
-            crates: self
-                .crates
-                .iter()
-                .map(|name| wire::Crate { name: name.clone() })
-                .collect(),
             edges: (0..fn_count)
                 .flat_map(|f| {
                     self.callees(FnId(f))
                         .iter()
-                        .map(move |&(e, n)| (f, endpoint(e), n))
+                        .map(move |&(callee, n)| (f, callee.0, n))
                 })
                 .collect(),
         }
     }
 }
-
-const STD: &str = "std";
 
 /// Whether the document defines any fn of a workspace package.
 pub fn is_workspace_doc(doc: &Document, workspace: &HashSet<String>) -> bool {
@@ -220,15 +198,10 @@ pub fn build(
         })
         .collect();
 
-    #[derive(PartialEq, Eq, Hash)]
-    enum Callee {
-        Fn(FnId),
-        Crate(String),
-    }
-    let mut counts: HashMap<(FnId, Callee), u32> = HashMap::new();
+    let mut counts: HashMap<(FnId, FnId), u32> = HashMap::new();
     for doc in &docs {
         for occ in doc.doc.occurrences.iter().filter(|o| !is_definition(o)) {
-            let Some(symbol) = Symbol::parse(&occ.symbol).filter(Symbol::is_callable) else {
+            let Some(&callee) = fn_of_symbol.get(occ.symbol.as_str()) else {
                 continue;
             };
             let Some(caller) = doc
@@ -236,16 +209,6 @@ pub fn build(
                 .and_then(|e| doc.fn_of_entry[e])
             else {
                 continue;
-            };
-            let callee = if workspace.contains(&symbol.package) {
-                match fn_of_symbol.get(occ.symbol.as_str()) {
-                    Some(&f) => Callee::Fn(f),
-                    None => continue,
-                }
-            } else if (lang.is_std_package)(&symbol.package) {
-                Callee::Crate(STD.to_string())
-            } else {
-                Callee::Crate(symbol.package)
             };
             *counts.entry((caller, callee)).or_default() += 1;
         }
@@ -279,12 +242,12 @@ pub fn build(
                 } => {
                     let key = (doc.package.as_str(), trait_base(trait_), name.as_str());
                     for &decl in trait_decls.get(&key).into_iter().flatten() {
-                        *counts.entry((decl, Callee::Fn(f))).or_default() += 1;
+                        *counts.entry((decl, f)).or_default() += 1;
                     }
                 }
                 What::Closure => {
                     if let FnKind::Closure { parent } = fns[f.0 as usize].kind {
-                        *counts.entry((parent, Callee::Fn(f))).or_default() += 1;
+                        *counts.entry((parent, f)).or_default() += 1;
                     }
                 }
                 _ => {}
@@ -292,31 +255,9 @@ pub fn build(
         }
     }
 
-    let mut crates: Vec<String> = counts
-        .keys()
-        .filter_map(|(_, c)| match c {
-            Callee::Crate(name) => Some(name.clone()),
-            Callee::Fn(_) => None,
-        })
-        .collect::<HashSet<_>>()
+    let mut edges: Vec<(FnId, FnId, u32)> = counts
         .into_iter()
-        .collect();
-    crates.sort();
-    let crate_id: HashMap<&str, CrateId> = crates
-        .iter()
-        .enumerate()
-        .map(|(i, c)| (c.as_str(), CrateId(i as u32)))
-        .collect();
-
-    let mut edges: Vec<(FnId, Endpoint, u32)> = counts
-        .into_iter()
-        .map(|((caller, callee), n)| {
-            let e = match callee {
-                Callee::Fn(f) => Endpoint::Fn(f),
-                Callee::Crate(name) => Endpoint::Crate(crate_id[name.as_str()]),
-            };
-            (caller, e, n)
-        })
+        .map(|((caller, callee), n)| (caller, callee, n))
         .collect();
     edges.sort();
     let mut out_offsets = Vec::with_capacity(fns.len() + 1);
@@ -332,7 +273,6 @@ pub fn build(
     CallGraph {
         files,
         fns,
-        crates,
         out_offsets,
         out,
     }
@@ -609,6 +549,31 @@ mod tests {
         let labels: Vec<&str> = g.fns.iter().map(|f| f.label.as_str()).collect();
         assert_eq!(labels, ["ui.render"]);
         assert!(g.edges.is_empty());
+    }
+
+    /// ```text
+    /// 0 fn render() {
+    /// 1     a(); std::mem::swap(x, y); rawish::f();
+    /// 2 }
+    /// 3 fn a() {}
+    /// ```
+    #[test]
+    fn calls_outside_the_workspace_produce_no_edge() {
+        let mut std_call = occ("", &[1, 20, 24], &[], false);
+        std_call.symbol = "rust-analyzer cargo std 1.0.0 mem/swap().".into();
+        let mut dep_call = occ("", &[1, 43, 44], &[], false);
+        dep_call.symbol = "rust-analyzer cargo rawish 0.1.0 f().".into();
+        let g = build_one(
+            vec![
+                occ("ui/render().", &[0, 3, 9], &[0, 0, 2, 1], true),
+                occ("ui/a().", &[1, 4, 5], &[], false),
+                std_call,
+                dep_call,
+                occ("ui/a().", &[3, 3, 4], &[3, 0, 9], true),
+            ],
+            SourceSpans::default(),
+        );
+        assert_eq!(edges_by_label(&g), [("ui.render", "ui.a", 1)]);
     }
 
     #[test]
