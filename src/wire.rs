@@ -38,6 +38,5 @@ pub enum FnKind {
     Method,
     TraitDecl,
     TraitImpl,
-    Closure,
     Nested,
 }

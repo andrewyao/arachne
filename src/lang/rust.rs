@@ -103,18 +103,15 @@ fn source_spans(source: &str) -> SourceSpans {
     let mut spans = SourceSpans::default();
     let mut stack = vec![tree.root_node()];
     while let Some(node) = stack.pop() {
-        match node.kind() {
-            "function_item" | "mod_item" | "impl_item" if has_attr(node, source, is_test_attr) => {
-                spans.tests.push(span(node));
-                continue;
-            }
-            "closure_expression" => spans.closures.push(span(node)),
-            _ => {}
+        if matches!(node.kind(), "function_item" | "mod_item" | "impl_item")
+            && has_attr(node, source, is_test_attr)
+        {
+            spans.tests.push(span(node));
+            continue;
         }
         let mut cursor = node.walk();
         stack.extend(node.named_children(&mut cursor));
     }
-    spans.closures.sort_by_key(|s| s.start);
     spans.tests.sort_by_key(|s| s.start);
     spans
 }
@@ -176,7 +173,7 @@ mod tests {
     }
 
     #[test]
-    fn finds_tests_and_closures() {
+    fn finds_tests() {
         let src = r#"
 fn keep() {
     let f = |x| x + 1;
@@ -198,7 +195,6 @@ impl Loader {
 }
 "#;
         let spans = source_spans(src);
-        assert_eq!(lines(&spans.closures), vec![(3, 3)]);
         assert_eq!(
             lines(&spans.tests),
             vec![(6, 6), (9, 9), (11, 13), (18, 18)]

@@ -35,7 +35,6 @@ pub struct Func {
 pub enum FnKind {
     Named(FnName),
     Nested { parent: FnId, name: FnName },
-    Closure { parent: FnId },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -78,7 +77,6 @@ impl CallGraph {
                         FnKind::Named(FnName::TraitDecl { .. }) => wire::FnKind::TraitDecl,
                         FnKind::Named(FnName::TraitImpl { .. }) => wire::FnKind::TraitImpl,
                         FnKind::Nested { .. } => wire::FnKind::Nested,
-                        FnKind::Closure { .. } => wire::FnKind::Closure,
                     },
                     lines: f.lines,
                 })
@@ -152,13 +150,7 @@ pub fn build(
                         name: name.clone(),
                     },
                 ),
-                (What::Closure, Some(p)) => (
-                    FnLabelInput::Closure { parent: p },
-                    FnKind::Closure {
-                        parent: FnId(first + p as u32),
-                    },
-                ),
-                (What::Closure, None) | (What::Excluded, _) => continue,
+                (What::Excluded, _) => continue,
             };
             local_of_entry[e] = Some(label_inputs.len());
             label_inputs.push(input);
@@ -235,22 +227,15 @@ pub fn build(
     for doc in &docs {
         for (entry, f) in doc.entries.iter().zip(&doc.fn_of_entry) {
             let Some(f) = *f else { continue };
-            match &entry.what {
-                What::Def {
-                    name: FnName::TraitImpl { trait_, name, .. },
-                    ..
-                } => {
-                    let key = (doc.package.as_str(), trait_base(trait_), name.as_str());
-                    for &decl in trait_decls.get(&key).into_iter().flatten() {
-                        *counts.entry((decl, f)).or_default() += 1;
-                    }
+            if let What::Def {
+                name: FnName::TraitImpl { trait_, name, .. },
+                ..
+            } = &entry.what
+            {
+                let key = (doc.package.as_str(), trait_base(trait_), name.as_str());
+                for &decl in trait_decls.get(&key).into_iter().flatten() {
+                    *counts.entry((decl, f)).or_default() += 1;
                 }
-                What::Closure => {
-                    if let FnKind::Closure { parent } = fns[f.0 as usize].kind {
-                        *counts.entry((parent, f)).or_default() += 1;
-                    }
-                }
-                _ => {}
             }
         }
     }
@@ -318,7 +303,6 @@ enum What {
         symbol: String,
         name: FnName,
     },
-    Closure,
     /// A test region. Occurrences inside it belong to no fn.
     Excluded,
 }
@@ -381,17 +365,6 @@ impl<'a> Doc<'a> {
             package.get_or_insert(symbol.package);
         }
         let package = package?;
-        entries.extend(
-            spans
-                .closures
-                .iter()
-                .filter(|c| !in_test(c.start))
-                .map(|&span| Entry {
-                    span,
-                    first_line: span.start.line,
-                    what: What::Closure,
-                }),
-        );
         entries.sort_by(|a, b| {
             a.span
                 .start
@@ -486,40 +459,49 @@ mod tests {
             .collect()
     }
 
-    /// ```text
-    /// 0 fn render() {
-    /// 1     a();
-    /// 2     xs.map(|x| {
-    /// 3         b();
-    /// 4     });
-    /// 5     c();
-    /// 6 }
-    /// 7 fn a() {}  fn b() {}  fn c() {}
-    /// ```
+    /// Spans come from the real tree-sitter pass, so closures in the source are seen.
     #[test]
-    fn closure_calls_belong_to_the_closure_and_calls_around_it_to_the_parent() {
+    fn closure_calls_are_credited_to_the_innermost_named_fn() {
+        let src = "\
+fn render() {
+    a();
+    xs.map(|x| {
+        b(|| c());
+    });
+    fn helper() {
+        let f = || a();
+    }
+}
+fn a() {}
+fn b() {}
+fn c() {}
+";
         let g = build_one(
             vec![
-                occ("ui/render().", &[0, 3, 9], &[0, 0, 6, 1], true),
+                occ("ui/render().", &[0, 3, 9], &[0, 0, 8, 1], true),
                 occ("ui/a().", &[1, 4, 5], &[], false),
                 occ("ui/b().", &[3, 8, 9], &[], false),
-                occ("ui/c().", &[5, 4, 5], &[], false),
-                occ("ui/a().", &[7, 3, 4], &[7, 0, 9], true),
-                occ("ui/b().", &[7, 14, 15], &[7, 11, 20], true),
-                occ("ui/c().", &[7, 25, 26], &[7, 22, 31], true),
+                occ("ui/c().", &[3, 13, 14], &[], false),
+                occ("ui/helper().", &[5, 7, 13], &[5, 4, 7, 5], true),
+                occ("ui/a().", &[6, 19, 20], &[], false),
+                occ("ui/a().", &[9, 3, 4], &[9, 0, 9], true),
+                occ("ui/b().", &[10, 3, 4], &[10, 0, 9], true),
+                occ("ui/c().", &[11, 3, 4], &[11, 0, 9], true),
             ],
-            SourceSpans {
-                closures: vec![span((2, 11), (4, 5))],
-                tests: vec![],
-            },
+            (RUST.source_spans)(src),
+        );
+        let labels: Vec<&str> = g.fns.iter().map(|f| f.label.as_str()).collect();
+        assert_eq!(
+            labels,
+            ["ui.render", "ui.render::helper", "ui.a", "ui.b", "ui.c"]
         );
         assert_eq!(
             edges_by_label(&g),
             [
-                ("ui.render", "ui.render::{closure#1}", 1),
                 ("ui.render", "ui.a", 1),
+                ("ui.render", "ui.b", 1),
                 ("ui.render", "ui.c", 1),
-                ("ui.render::{closure#1}", "ui.b", 1),
+                ("ui.render::helper", "ui.a", 1),
             ]
         );
     }
@@ -542,7 +524,6 @@ mod tests {
                 occ("ui/render().", &[4, 8, 14], &[], false),
             ],
             SourceSpans {
-                closures: vec![],
                 tests: vec![span((2, 0), (6, 1))],
             },
         );

@@ -74,7 +74,6 @@ impl Span {
 /// What SCIP can't tell us about a source file.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SourceSpans {
-    pub closures: Vec<Span>,
     /// Test fns and test-only modules. Everything inside is excluded.
     pub tests: Vec<Span>,
 }

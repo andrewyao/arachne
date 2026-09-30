@@ -51,7 +51,6 @@ pub fn file_labels(module_paths: &[Vec<String>], file_paths: &[&str]) -> Vec<Str
 pub enum FnLabelInput<'a> {
     Named(&'a FnName),
     Nested { parent: usize, name: &'a FnName },
-    Closure { parent: usize },
 }
 
 /// Labels for the fns of one file, in the order given.
@@ -60,7 +59,6 @@ pub fn fn_labels(file_label: &str, fns: &[FnLabelInput]) -> Vec<String> {
         .iter()
         .map(|f| match f {
             FnLabelInput::Named(name) | FnLabelInput::Nested { name, .. } => short_name(name),
-            FnLabelInput::Closure { .. } => String::new(),
         })
         .collect();
 
@@ -87,18 +85,9 @@ pub fn fn_labels(file_label: &str, fns: &[FnLabelInput]) -> Vec<String> {
         }
     }
 
-    let mut closures_seen: HashMap<usize, u32> = HashMap::new();
     for (i, f) in fns.iter().enumerate() {
-        match *f {
-            FnLabelInput::Named(_) => {}
-            FnLabelInput::Nested { parent, .. } => {
-                short[i] = format!("{}::{}", short[parent], short[i])
-            }
-            FnLabelInput::Closure { parent } => {
-                let n = closures_seen.entry(parent).or_default();
-                *n += 1;
-                short[i] = format!("{}::{{closure#{n}}}", short[parent]);
-            }
+        if let FnLabelInput::Nested { parent, .. } = *f {
+            short[i] = format!("{}::{}", short[parent], short[i]);
         }
     }
     short
@@ -198,10 +187,9 @@ mod tests {
         let fns = [
             FnLabelInput::Named(&inherent),
             FnLabelInput::Named(&from_str),
-            FnLabelInput::Closure { parent: 1 },
             FnLabelInput::Named(&from_u8),
             FnLabelInput::Nested {
-                parent: 3,
+                parent: 2,
                 name: &helper,
             },
             FnLabelInput::Named(&decl),
@@ -212,36 +200,10 @@ mod tests {
             [
                 "album.Photo::from",
                 "album.<Photo as From<&str>>::from",
-                "album.<Photo as From<&str>>::from::{closure#1}",
                 "album.<Photo as From<u8>>::from",
                 "album.<Photo as From<u8>>::from::helper",
                 "album.Shape::area",
                 "album.Square::area",
-            ]
-        );
-    }
-
-    #[test]
-    fn closures_number_per_parent_in_order() {
-        let render = free("render");
-        let other = free("other");
-        let fns = [
-            FnLabelInput::Named(&render),
-            FnLabelInput::Closure { parent: 0 },
-            FnLabelInput::Closure { parent: 1 },
-            FnLabelInput::Closure { parent: 0 },
-            FnLabelInput::Named(&other),
-            FnLabelInput::Closure { parent: 4 },
-        ];
-        assert_eq!(
-            fn_labels("ui", &fns),
-            [
-                "ui.render",
-                "ui.render::{closure#1}",
-                "ui.render::{closure#1}::{closure#1}",
-                "ui.render::{closure#2}",
-                "ui.other",
-                "ui.other::{closure#1}",
             ]
         );
     }
