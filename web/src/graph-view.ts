@@ -2,9 +2,26 @@ import { forceCollide } from 'd3-force-3d';
 import ForceGraph from 'force-graph';
 import { LabelGrid, type Box } from './labels';
 import { clusterForce } from './layout';
-import { effectiveExpanded, fileKey, fnKey, project, type ExpandMode, type NodeKey, type ViewNode } from './project';
+import {
+  effectiveExpanded,
+  fileKey,
+  fnKey,
+  openFiles,
+  project,
+  type ExpandMode,
+  type NodeKey,
+  type ViewNode,
+} from './project';
 import type { Graph } from './types';
-import { removeUserHidden, visible } from './visibility';
+import {
+  hiddenFns,
+  hiddenKeyIndex,
+  removeUserHidden,
+  visible,
+  type HiddenKey,
+  type HiddenTarget,
+  type Visible,
+} from './visibility';
 
 type SimNode = ViewNode & { x?: number; y?: number; vx?: number; vy?: number; r: number };
 type SimLink = { source: NodeKey | SimNode; target: NodeKey | SimNode; count: number; via: boolean };
@@ -12,6 +29,7 @@ type Point = readonly [x: number, y: number];
 
 interface Theme {
   ink: string;
+  surface: string;
   file: string;
   fn: string;
   link: string;
@@ -28,6 +46,7 @@ function readTheme(): Theme {
   const v = (name: string) => s.getPropertyValue(name).trim();
   return {
     ink: v('--ink'),
+    surface: v('--surface'),
     file: v('--file'),
     fn: v('--fn'),
     link: v('--link'),
@@ -45,6 +64,10 @@ const HULL_PAD = 14;
 const DOUBLE_CLICK_MS = 350;
 const CHARGE_RANGE = 300;
 const DIMMED_ALPHA = 0.15;
+const VACANT_ALPHA = 0.35;
+// Screen px: dash and gap of a link that runs through contracted private fns.
+const VIA_DASH = [4, 3] as const;
+const CHIP = { px: 11, padX: 6, gap: 6, height: 16 };
 const COLLIDE_PAD = 2;
 const CLUSTER = { pull: 0.15, gap: 16, push: 0.6, spacing: 20 };
 const LINK_SAME_FILE = { distance: 18, strength: 1 };
@@ -79,17 +102,37 @@ export interface GraphView {
   focus(key: NodeKey): void;
   select(fnId: number): void;
   setMode(mode: ExpandMode): void;
+  setHidden(keys: Iterable<HiddenKey>): void;
+  setPrivateShown(fileId: number, shown: boolean): void;
+  isPrivateShown(fileId: number): boolean;
+  /** Private fns in the file that are contracted away unless the file shows its private fns. */
+  privateCount(fileId: number): number;
+  isUserHidden(target: HiddenTarget): boolean;
+  isContracted(fnId: number): boolean;
 }
 
-export function createGraphView(
-  root: HTMLElement,
-  graph: Graph,
-  onOpenFn: (fnId: number) => void,
-): GraphView {
+export interface GraphViewEvents {
+  onOpenFn(fnId: number): void;
+  onContextMenu(target: HiddenTarget, e: MouseEvent): void;
+}
+
+export function createGraphView(root: HTMLElement, graph: Graph, events: GraphViewEvents): GraphView {
   const manual = new Set<number>();
   let mode: ExpandMode = 'manual';
-  // A snapshot, never `manual` itself, so sync() can diff the old view against the new one.
+  const keyIndex = hiddenKeyIndex(graph);
+  let pruned = removeUserHidden(graph, [], keyIndex);
+  const showPrivate = new Set<number>();
+  let privateHidden = hiddenFns(graph, showPrivate);
+  let vis: Visible = visible(graph, pruned, privateHidden);
+  const privateCounts = new Map<number, number>();
+  for (const fn of hiddenFns(graph, new Set())) {
+    const file = graph.fns[fn]!.file;
+    privateCounts.set(file, (privateCounts.get(file) ?? 0) + 1);
+  }
+  // The files drawn as fns. A snapshot, so sync() can diff the old view against the new one.
   let expanded: ReadonlySet<number> = new Set();
+  let drawn = new Set<NodeKey>();
+  let chips: { fileId: number; box: Box }[] = [];
   const objects = new Map<NodeKey, SimNode>();
   const spawnAt = new Map<NodeKey, Point>();
   let hulls = new Map<number, Point[]>();
@@ -133,6 +176,7 @@ export function createGraphView(
       ctx.fill();
     })
     .linkWidth(linkWidth)
+    .linkLineDash((l) => (l.via ? VIA_DASH.map((d) => d / zoomK) : null))
     .linkDirectionalArrowLength((l) => (zoomK < ARROW_ZOOM ? 0 : 3 + Math.log2(l.count)))
     .linkDirectionalArrowRelPos(1)
     .linkColor(linkColor)
@@ -140,7 +184,7 @@ export function createGraphView(
     .onRenderFramePost(paintLabels)
     .onNodeHover((n) => {
       hovered = n;
-      root.style.cursor = n ? 'pointer' : '';
+      root.style.cursor = n || overChip ? 'pointer' : '';
     })
     // force-graph resolves clicks from a shadow canvas it repaints at most every 800 ms, so
     // while nodes or the camera move it reports whatever used to be under the pointer.
@@ -171,6 +215,18 @@ export function createGraphView(
     ?.distance((l: SimLink) => (inFile(l) ? LINK_SAME_FILE : LINK_CROSS).distance)
     .strength((l: SimLink) => (inFile(l) ? LINK_SAME_FILE : LINK_CROSS).strength * baseStrength(l));
 
+  let overChip = false;
+  root.addEventListener('mousemove', (e) => {
+    const [sx, sy] = screenPoint(e);
+    overChip = chipAt(sx, sy) !== undefined;
+    root.style.cursor = hovered || overChip ? 'pointer' : '';
+  });
+  root.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    const target = targetAt(e);
+    if (target) events.onContextMenu(target, e);
+  });
+
   new ResizeObserver(() => fg.width(root.clientWidth).height(root.clientHeight)).observe(root);
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
     theme = readTheme();
@@ -185,7 +241,9 @@ export function createGraphView(
 
   refresh();
   // Lets the browser verification script find node screen positions.
-  if (import.meta.env.DEV) Object.assign(window, { __arachneGraph: fg, __arachneLabels: () => placedLabels });
+  if (import.meta.env.DEV) {
+    Object.assign(window, { __arachneGraph: fg, __arachneLabels: () => placedLabels, __arachneChips: () => chips });
+  }
 
   function fileOfFn(n: SimNode): number | undefined {
     return n.kind === 'fn' ? graph.fns[n.id]!.file : undefined;
@@ -196,7 +254,9 @@ export function createGraphView(
   }
 
   function refresh() {
-    const view = project(graph, visible(graph, removeUserHidden(graph, []), new Set()), expanded);
+    const view = project(graph, vis, expanded);
+    drawn = new Set(view.nodes.map((n) => n.key));
+    if (hovered && !drawn.has(hovered.key)) hovered = null;
     const nodes = view.nodes.map((vn) => {
       let obj = objects.get(vn.key);
       if (!obj) {
@@ -257,46 +317,88 @@ export function createGraphView(
     }
   }
 
-  // Newly expanded files burst out from where their node was; newly collapsed files reappear
-  // at the centroid of their fns.
+  function setHidden(keys: Iterable<HiddenKey>) {
+    pruned = removeUserHidden(graph, keys, keyIndex);
+    vis = visible(graph, pruned, privateHidden);
+    sync();
+  }
+
+  function setPrivateShown(fileId: number, shown: boolean) {
+    if (shown === showPrivate.has(fileId)) return;
+    if (shown) showPrivate.add(fileId);
+    else showPrivate.delete(fileId);
+    privateHidden = hiddenFns(graph, showPrivate);
+    vis = visible(graph, pruned, privateHidden);
+    sync();
+  }
+
+  // Newly expanded files burst out from where their node was, fns newly shown in an open file
+  // from the centroid of its fns, and newly collapsed files reappear at that centroid.
   function sync() {
-    const next = new Set(effectiveExpanded(mode, manual, graph.files.length));
-    for (const fileId of next) if (!expanded.has(fileId)) spawnFns(fileId);
-    for (const fileId of expanded) {
-      if (next.has(fileId)) continue;
-      spawnAt.set(fileKey(fileId), fnCentroid(fileId));
-      if (hovered?.kind === 'fn' && graph.fns[hovered.id]!.file === fileId) hovered = null;
+    const next = openFiles(vis, effectiveExpanded(mode, manual, graph.files.length));
+    for (const fileId of next) {
+      if (!expanded.has(fileId)) spawnFns(fileId, fileCenter(fileId));
+      else spawnFns(fileId, fnCentroid(fileId), (fn) => !drawn.has(fnKey(fn)));
     }
+    for (const fileId of expanded) if (!next.has(fileId)) spawnAt.set(fileKey(fileId), fnCentroid(fileId));
     expanded = next;
     refresh();
   }
 
-  function spawnFns(fileId: number) {
-    const file = objects.get(fileKey(fileId));
-    const [cx, cy] = [file?.x ?? 0, file?.y ?? 0];
+  function spawnFns(fileId: number, [cx, cy]: Point, only = (_fn: number) => true) {
     const [start, end] = graph.files[fileId]!.fns;
-    const n = end - start;
-    for (let fn = start; fn < end; fn++) {
+    const fns: number[] = [];
+    for (let fn = start; fn < end; fn++) if (!vis.hiddenFns.has(fn) && only(fn)) fns.push(fn);
+    fns.forEach((fn, i) => {
       // A small ring instead of a single point, so the charge force has a direction to push.
-      const a = (2 * Math.PI * (fn - start)) / n;
-      const d = n === 1 ? 0 : 6;
+      const a = (2 * Math.PI * i) / fns.length;
+      const d = fns.length === 1 ? 0 : 6;
       spawnAt.set(fnKey(fn), [cx + d * Math.cos(a), cy + d * Math.sin(a)]);
-    }
+    });
+  }
+
+  function fileCenter(fileId: number): Point {
+    const o = objects.get(fileKey(fileId));
+    return [o?.x ?? 0, o?.y ?? 0];
+  }
+
+  function screenPoint(e: MouseEvent): Point {
+    const rect = root.getBoundingClientRect();
+    return [e.clientX - rect.left, e.clientY - rect.top];
   }
 
   function click(e: MouseEvent) {
-    const rect = root.getBoundingClientRect();
-    const sx = e.clientX - rect.left;
-    const sy = e.clientY - rect.top;
+    const [sx, sy] = screenPoint(e);
+    const chip = chipAt(sx, sy);
+    if (chip !== undefined) return setPrivateShown(chip, !showPrivate.has(chip));
     const p = fg.screen2GraphCoords(sx, sy);
     const k = fg.zoom();
     const hit = nearestNode(p.x, p.y);
     if (hit && hit.gap * k <= HIT_SLOP) return clickNode(hit.node);
     if (hit && hit.gap * k <= NEAR_MISS) return;
     if (onLink(sx, sy)) return;
-    for (const [fileId, hull] of hulls) {
-      if (insidePolygon(hull, [p.x, p.y])) return collapse(fileId);
-    }
+    const hull = hullAt(p.x, p.y);
+    if (hull !== undefined) collapse(hull);
+  }
+
+  function targetAt(e: MouseEvent): HiddenTarget | undefined {
+    const [sx, sy] = screenPoint(e);
+    const chip = chipAt(sx, sy);
+    if (chip !== undefined) return { kind: 'file', id: chip };
+    const p = fg.screen2GraphCoords(sx, sy);
+    const hit = nearestNode(p.x, p.y);
+    if (hit && hit.gap * fg.zoom() <= HIT_SLOP) return { kind: hit.node.kind, id: hit.node.id };
+    const hull = hullAt(p.x, p.y);
+    return hull === undefined ? undefined : { kind: 'file', id: hull };
+  }
+
+  function hullAt(x: number, y: number): number | undefined {
+    for (const [fileId, hull] of hulls) if (insidePolygon(hull, [x, y])) return fileId;
+    return undefined;
+  }
+
+  function chipAt(sx: number, sy: number): number | undefined {
+    return chips.find(({ box }) => sx >= box.x0 && sx <= box.x1 && sy >= box.y0 && sy <= box.y1)?.fileId;
   }
 
   function nearestNode(x: number, y: number): { node: SimNode; gap: number } | null {
@@ -339,7 +441,7 @@ export function createGraphView(
         }
         lastFnClick = { fnId: n.id, at: now };
         select(n.id);
-        onOpenFn(n.id);
+        events.onOpenFn(n.id);
       }
     }
   }
@@ -360,15 +462,27 @@ export function createGraphView(
   }
 
   function fnCentroid(fileId: number): Point {
-    const [start, end] = graph.files[fileId]!.fns;
+    const pts = drawnFnPoints(fileId);
+    if (!pts.length) return fileCenter(fileId);
     let sx = 0;
     let sy = 0;
-    for (let fn = start; fn < end; fn++) {
-      const o = objects.get(fnKey(fn));
-      sx += o?.x ?? 0;
-      sy += o?.y ?? 0;
+    for (const [x, y] of pts) {
+      sx += x;
+      sy += y;
     }
-    return [sx / (end - start), sy / (end - start)];
+    return [sx / pts.length, sy / pts.length];
+  }
+
+  function drawnFnPoints(fileId: number): Point[] {
+    const [start, end] = graph.files[fileId]!.fns;
+    const pts: Point[] = [];
+    for (let fn = start; fn < end; fn++) {
+      const key = fnKey(fn);
+      if (!drawn.has(key)) continue;
+      const o = objects.get(key);
+      if (o?.x !== undefined && o.y !== undefined) pts.push([o.x, o.y]);
+    }
+    return pts;
   }
 
   function select(fnId: number) {
@@ -378,6 +492,10 @@ export function createGraphView(
 
   function isDimmed(key: NodeKey): boolean {
     return hovered !== null && hovered.key !== key && !neighbors.get(hovered.key)?.has(key);
+  }
+
+  function isVacant(n: SimNode): boolean {
+    return n.kind === 'file' && vis.vacant.has(n.id);
   }
 
   function linkColor(l: SimLink): string {
@@ -390,7 +508,7 @@ export function createGraphView(
   function paintNode(n: SimNode, ctx: CanvasRenderingContext2D, scale: number) {
     const x = n.x ?? 0;
     const y = n.y ?? 0;
-    ctx.globalAlpha = isDimmed(n.key) ? DIMMED_ALPHA : 1;
+    ctx.globalAlpha = isDimmed(n.key) ? DIMMED_ALPHA : isVacant(n) ? VACANT_ALPHA : 1;
     ctx.beginPath();
     ctx.arc(x, y, n.r, 0, 2 * Math.PI);
     ctx.fillStyle = n.kind === 'file' ? theme.file : theme.fn;
@@ -411,12 +529,7 @@ export function createGraphView(
     hulls = new Map();
     hullTops = new Map();
     for (const fileId of expanded) {
-      const [start, end] = graph.files[fileId]!.fns;
-      const pts: Point[] = [];
-      for (let fn = start; fn < end; fn++) {
-        const o = objects.get(fnKey(fn));
-        if (o?.x !== undefined && o.y !== undefined) pts.push([o.x, o.y]);
-      }
+      const pts = drawnFnPoints(fileId);
       if (!pts.length) continue;
       const hull = padded(pts, HULL_PAD);
       hulls.set(fileId, hull);
@@ -448,7 +561,7 @@ export function createGraphView(
       weight: n.kind === 'file' ? 600 : 400,
       color: theme.ink,
       above: false,
-      dimmed: isDimmed(n.key),
+      dimmed: isDimmed(n.key) || isVacant(n),
     });
     const tryNode = (n: SimNode | undefined) => {
       if (!n || done.has(n.key) || n.x === undefined) return;
@@ -471,22 +584,60 @@ export function createGraphView(
       ctx.fillText(l.text, l.x, l.y + (l.above ? -3 : 2) / scale);
     };
 
-    if (selected !== null && expanded.has(graph.fns[selected]!.file)) tryNode(objects.get(fnKey(selected)));
+    if (selected !== null && drawn.has(fnKey(selected))) tryNode(objects.get(fnKey(selected)));
     if (hovered) {
       tryNode(hovered);
       for (const k of near ?? []) tryNode(objects.get(k));
     }
+    chips = [];
     const bySize = [...hullTops].sort(([a], [b]) => fnCount(b) - fnCount(a));
-    for (const [fileId, [x, y]] of bySize) {
-      const text = graph.files[fileId]!.label;
-      place({ text, x, y, px: 12, weight: 600, color: theme.file, above: true, dimmed: false });
-    }
+    for (const [fileId, [x, y]] of bySize) placeHullLabel(fileId, x, y);
     for (const n of labelOrder) {
       if (n.kind === 'fn' && scale < FN_LABEL_ZOOM) break;
       tryNode(n);
     }
     ctx.globalAlpha = 1;
     placedLabels = grid.placed;
+
+    // The label above an expanded file, followed by its private-fn chip when it has any.
+    function placeHullLabel(fileId: number, x: number, y: number) {
+      const text = graph.files[fileId]!.label;
+      const count = privateCounts.get(fileId) ?? 0;
+      if (!count) return place({ text, x, y, px: 12, weight: 600, color: theme.file, above: true, dimmed: false });
+      const chipText = `${count} private · ${showPrivate.has(fileId) ? 'hide' : 'show'}`;
+      const labelW = textWidth(text, 12, 600);
+      const chipW = textWidth(chipText, CHIP.px, 400) + 2 * CHIP.padX;
+      const w = labelW + CHIP.gap + chipW;
+      const h = Math.max(12 * LABEL_LINE, CHIP.height);
+      const sx = (x - origin.x) * scale;
+      const sy = (y - origin.y) * scale - 3;
+      const box = { x0: sx - w / 2, x1: sx + w / 2, y0: sy - h, y1: sy };
+      if (box.x1 < 0 || box.y1 < 0 || box.x0 > fg.width() || box.y0 > fg.height()) return;
+      if (!grid.tryPlace(box)) return;
+      const mid = sy - h / 2;
+      const chipBox = { x0: box.x1 - chipW, x1: box.x1, y0: mid - CHIP.height / 2, y1: mid + CHIP.height / 2 };
+      chips.push({ fileId, box: chipBox });
+
+      const gx = (px: number) => origin.x + px / scale;
+      const gy = (py: number) => origin.y + py / scale;
+      ctx.globalAlpha = 1;
+      ctx.textBaseline = 'middle';
+      ctx.textAlign = 'left';
+      ctx.font = `600 ${12 / scale}px ${theme.sans}`;
+      ctx.fillStyle = theme.file;
+      ctx.fillText(text, gx(box.x0), gy(mid));
+
+      ctx.beginPath();
+      ctx.roundRect(gx(chipBox.x0), gy(chipBox.y0), chipW / scale, CHIP.height / scale, CHIP.height / 2 / scale);
+      ctx.fillStyle = theme.surface;
+      ctx.fill();
+      ctx.lineWidth = 1 / scale;
+      ctx.strokeStyle = theme.fn;
+      ctx.stroke();
+      ctx.font = `400 ${CHIP.px / scale}px ${theme.sans}`;
+      ctx.fillStyle = theme.ink;
+      ctx.fillText(chipText, gx(chipBox.x0 + CHIP.padX), gy(mid));
+    }
   }
 
   function fnCount(fileId: number): number {
@@ -518,11 +669,15 @@ export function createGraphView(
     switch (n.kind) {
       case 'file': {
         const f = graph.files[n.id]!;
-        return `${escapeHtml(f.label)}<div class="tip-path">${escapeHtml(f.path)}</div>`;
+        const vacant = vis.vacant.has(n.id)
+          ? '<div class="tip-path">Every fn is hidden. Right-click to show its private fns.</div>'
+          : '';
+        return `${escapeHtml(f.label)}<div class="tip-path">${escapeHtml(f.path)}</div>${vacant}`;
       }
       case 'fn': {
         const f = graph.fns[n.id]!;
-        return `${escapeHtml(f.label)}<div class="tip-path">${f.kind.replace('_', ' ')}, lines ${f.lines[0]}-${f.lines[1]}</div>`;
+        const kind = `${f.private ? 'private ' : ''}${f.kind.replace('_', ' ')}`;
+        return `${escapeHtml(f.label)}<div class="tip-path">${kind}, lines ${f.lines[0]}-${f.lines[1]}</div>`;
       }
     }
   }
@@ -532,6 +687,12 @@ export function createGraphView(
     select,
     focus,
     setMode,
+    setHidden,
+    setPrivateShown,
+    isPrivateShown: (fileId) => showPrivate.has(fileId),
+    privateCount: (fileId) => privateCounts.get(fileId) ?? 0,
+    isUserHidden: (t) => (t.kind === 'file' ? pruned.files : pruned.fns).has(t.id),
+    isContracted: (fnId) => privateHidden.has(fnId) && !pruned.fns.has(fnId),
   };
 }
 

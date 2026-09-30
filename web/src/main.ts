@@ -22,7 +22,10 @@ async function main() {
     toggle.open();
     void panel.show(fnId);
   };
-  const view = createGraphView(document.getElementById('graph')!, graph, openFn);
+  const view = createGraphView(document.getElementById('graph')!, graph, {
+    onOpenFn: openFn,
+    onContextMenu: () => {},
+  });
 
   const hint = document.getElementById('hint')!;
   const manualHint = hint.textContent;
