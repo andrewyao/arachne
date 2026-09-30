@@ -1,5 +1,6 @@
 import { forceCollide } from 'd3-force-3d';
 import ForceGraph from 'force-graph';
+import { LabelGrid, type Box } from './labels';
 import { clusterForce } from './layout';
 import { fileKey, fnKey, project, type NodeKey, type ViewNode } from './project';
 import type { Graph } from './types';
@@ -47,6 +48,22 @@ const COLLIDE_PAD = 2;
 const CLUSTER = { pull: 0.15, gap: 16, push: 0.3 };
 const LINK_SAME_FILE = { distance: 18, strength: 1 };
 const LINK_CROSS = { distance: 70, strength: 0.15 };
+const LINK_MAX_WIDTH = 2.5;
+// Below these zoom levels fn labels and arrowheads are noise rather than information.
+const FN_LABEL_ZOOM = 1.2;
+const ARROW_ZOOM = 3;
+const LABEL_LINE = 1.25;
+
+interface Label {
+  text: string;
+  x: number;
+  y: number;
+  px: number;
+  weight: 400 | 600;
+  color: string;
+  above: boolean;
+  dimmed: boolean;
+}
 
 export interface GraphView {
   expand(fileId: number): void;
@@ -63,13 +80,19 @@ export function createGraphView(
   const objects = new Map<NodeKey, SimNode>();
   const spawnAt = new Map<NodeKey, Point>();
   let hulls = new Map<number, Point[]>();
+  let hullTops = new Map<number, Point>();
+  // Files by size, then fns by degree: the order labels claim space when nothing is hovered.
+  let labelOrder: SimNode[] = [];
+  let placedLabels: Box[] = [];
+  const textWidths = new Map<string, number>();
   let neighbors = new Map<NodeKey, Set<NodeKey>>();
   let hovered: SimNode | null = null;
   let selected: number | null = null;
   let lastFnClick: { fnId: number; at: number } | null = null;
   let theme = readTheme();
   let fitted = false;
-  let visible = { x0: -Infinity, y0: -Infinity, x1: Infinity, y1: Infinity };
+  let zoomK = 1;
+  let origin = { x: 0, y: 0 };
 
   const radius = (n: ViewNode): number => {
     switch (n.kind) {
@@ -81,6 +104,8 @@ export function createGraphView(
       }
     }
   };
+
+  const measure = document.createElement('canvas').getContext('2d')!;
 
   const fg = new ForceGraph<SimNode, SimLink>(root)
     .nodeId('key')
@@ -94,11 +119,12 @@ export function createGraphView(
       ctx.arc(n.x ?? 0, n.y ?? 0, n.r + 2, 0, 2 * Math.PI);
       ctx.fill();
     })
-    .linkWidth((l) => 0.6 + Math.log2(l.count) * 0.9)
-    .linkDirectionalArrowLength((l) => 3.5 + Math.log2(l.count))
+    .linkWidth((l) => Math.min(LINK_MAX_WIDTH, 0.5 + Math.log2(l.count) * 0.6))
+    .linkDirectionalArrowLength((l) => (zoomK < ARROW_ZOOM ? 0 : 3 + Math.log2(l.count)))
     .linkDirectionalArrowRelPos(1)
     .linkColor(linkColor)
     .onRenderFramePre(beforeFrame)
+    .onRenderFramePost(paintLabels)
     .onNodeHover((n) => {
       hovered = n;
       root.style.cursor = n ? 'pointer' : '';
@@ -137,12 +163,13 @@ export function createGraphView(
   // Canvas text measured before the web font loads would keep the fallback face.
   document.fonts.ready.then(() => {
     theme = readTheme();
+    textWidths.clear();
     redraw();
   });
 
   refresh();
   // Lets the browser verification script find node screen positions.
-  if (import.meta.env.DEV) Object.assign(window, { __arachneGraph: fg });
+  if (import.meta.env.DEV) Object.assign(window, { __arachneGraph: fg, __arachneLabels: () => placedLabels });
 
   function fileOfFn(n: SimNode): number | undefined {
     return n.kind === 'fn' ? graph.fns[n.id]!.file : undefined;
@@ -180,6 +207,10 @@ export function createGraphView(
       link(l.source, l.target);
       link(l.target, l.source);
     }
+    const size = (n: SimNode) => (n.kind === 'file' ? n.r : 0);
+    labelOrder = [...nodes].sort((a, b) =>
+      a.kind !== b.kind ? (a.kind === 'file' ? -1 : 1) : size(b) - size(a) || degree(b) - degree(a),
+    );
     fg.graphData({ nodes, links: view.links });
   }
 
@@ -281,28 +312,14 @@ export function createGraphView(
       ctx.arc(x, y, n.r + 2.2, 0, 2 * Math.PI);
       ctx.stroke();
     }
-
-    // Fn labels only once zoomed in, which keeps 5k-node frames cheap and legible.
-    const showLabel =
-      (n.kind !== 'fn' || scale > 1.4 || n === hovered || n.id === selected) &&
-      x > visible.x0 && x < visible.x1 && y > visible.y0 && y < visible.y1;
-    if (showLabel) {
-      const size = (n.kind === 'fn' ? 11 : 12) / scale;
-      ctx.font = `${n.kind === 'file' ? 600 : 400} ${size}px ${theme.sans}`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'top';
-      ctx.fillStyle = theme.ink;
-      ctx.fillText(nodeLabel(n), x, y + n.r + 2 / scale);
-    }
     ctx.globalAlpha = 1;
   }
 
   function beforeFrame(ctx: CanvasRenderingContext2D, scale: number) {
-    const a = fg.screen2GraphCoords(0, 0);
-    const b = fg.screen2GraphCoords(fg.width(), fg.height());
-    const margin = 120 / scale;
-    visible = { x0: a.x - margin, y0: a.y - margin, x1: b.x + margin, y1: b.y + margin };
+    zoomK = scale;
+    origin = fg.screen2GraphCoords(0, 0);
     hulls = new Map();
+    hullTops = new Map();
     for (const fileId of expanded) {
       const [start, end] = graph.files[fileId]!.fns;
       const pts: Point[] = [];
@@ -325,12 +342,77 @@ export function createGraphView(
 
       let top = hull[0]!;
       for (const p of hull) if (p[1] < top[1]) top = p;
-      ctx.font = `600 ${12 / scale}px ${theme.sans}`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'bottom';
-      ctx.fillStyle = theme.file;
-      ctx.fillText(graph.files[fileId]!.label, top[0], top[1] - 3 / scale);
+      hullTops.set(fileId, top);
     }
+  }
+
+  function paintLabels(ctx: CanvasRenderingContext2D, scale: number) {
+    const grid = new LabelGrid(fg.width(), fg.height());
+    const done = new Set<NodeKey>();
+    const near = hovered ? neighbors.get(hovered.key) : undefined;
+    const nodeLabelOf = (n: SimNode): Label => ({
+      text: nodeLabel(n),
+      x: n.x ?? 0,
+      y: (n.y ?? 0) + n.r,
+      px: n.kind === 'fn' ? 11 : 12,
+      weight: n.kind === 'file' ? 600 : 400,
+      color: theme.ink,
+      above: false,
+      dimmed: isDimmed(n.key),
+    });
+    const tryNode = (n: SimNode | undefined) => {
+      if (!n || done.has(n.key) || n.x === undefined) return;
+      done.add(n.key);
+      place(nodeLabelOf(n));
+    };
+    const place = (l: Label) => {
+      const w = textWidth(l.text, l.px, l.weight);
+      const h = l.px * LABEL_LINE;
+      const sx = (l.x - origin.x) * scale;
+      const sy = (l.y - origin.y) * scale + (l.above ? -3 : 2);
+      const box = { x0: sx - w / 2, x1: sx + w / 2, y0: l.above ? sy - h : sy, y1: l.above ? sy : sy + h };
+      if (box.x1 < 0 || box.y1 < 0 || box.x0 > fg.width() || box.y0 > fg.height()) return;
+      if (!grid.tryPlace(box)) return;
+      ctx.globalAlpha = l.dimmed ? DIMMED_ALPHA : 1;
+      ctx.font = `${l.weight} ${l.px / scale}px ${theme.sans}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = l.above ? 'bottom' : 'top';
+      ctx.fillStyle = l.color;
+      ctx.fillText(l.text, l.x, l.y + (l.above ? -3 : 2) / scale);
+    };
+
+    if (selected !== null && expanded.has(graph.fns[selected]!.file)) tryNode(objects.get(fnKey(selected)));
+    if (hovered) {
+      tryNode(hovered);
+      for (const k of near ?? []) tryNode(objects.get(k));
+    }
+    const bySize = [...hullTops].sort(([a], [b]) => fnCount(b) - fnCount(a));
+    for (const [fileId, [x, y]] of bySize) {
+      const text = graph.files[fileId]!.label;
+      place({ text, x, y, px: 12, weight: 600, color: theme.file, above: true, dimmed: false });
+    }
+    for (const n of labelOrder) {
+      if (n.kind === 'fn' && scale < FN_LABEL_ZOOM) break;
+      tryNode(n);
+    }
+    ctx.globalAlpha = 1;
+    placedLabels = grid.placed;
+  }
+
+  function fnCount(fileId: number): number {
+    const [start, end] = graph.files[fileId]!.fns;
+    return end - start;
+  }
+
+  function textWidth(text: string, px: number, weight: number): number {
+    const key = `${weight} ${px} ${text}`;
+    let w = textWidths.get(key);
+    if (w === undefined) {
+      measure.font = `${weight} ${px}px ${theme.sans}`;
+      w = measure.measureText(text).width;
+      textWidths.set(key, w);
+    }
+    return w;
   }
 
   function nodeLabel(n: SimNode): string {
