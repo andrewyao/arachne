@@ -122,8 +122,7 @@ export function createGraphView(root: HTMLElement, graph: Graph, events: GraphVi
   const keyIndex = hiddenKeyIndex(graph);
   let pruned = removeUserHidden(graph, [], keyIndex);
   const showPrivate = new Set<number>();
-  let privateHidden = hiddenFns(graph, showPrivate);
-  let vis: Visible = visible(graph, pruned, privateHidden);
+  let vis: Visible = visible(graph, pruned, showPrivate);
   const privateCounts = new Map<number, number>();
   for (const fn of hiddenFns(graph, new Set())) {
     const file = graph.fns[fn]!.file;
@@ -324,7 +323,7 @@ export function createGraphView(root: HTMLElement, graph: Graph, events: GraphVi
 
   function setHidden(keys: Iterable<HiddenKey>) {
     pruned = removeUserHidden(graph, keys, keyIndex);
-    vis = visible(graph, pruned, privateHidden);
+    vis = visible(graph, pruned, showPrivate);
     sync();
   }
 
@@ -332,8 +331,7 @@ export function createGraphView(root: HTMLElement, graph: Graph, events: GraphVi
     if (shown === showPrivate.has(fileId)) return;
     if (shown) showPrivate.add(fileId);
     else showPrivate.delete(fileId);
-    privateHidden = hiddenFns(graph, showPrivate);
-    vis = visible(graph, pruned, privateHidden);
+    vis = visible(graph, pruned, showPrivate);
     sync();
   }
 
@@ -696,7 +694,7 @@ export function createGraphView(root: HTMLElement, graph: Graph, events: GraphVi
     isPrivateShown: (fileId) => showPrivate.has(fileId),
     privateCount: (fileId) => privateCounts.get(fileId) ?? 0,
     isUserHidden: (t) => (t.kind === 'file' ? pruned.files : pruned.fns).has(t.id),
-    isContracted: (fnId) => privateHidden.has(fnId) && !pruned.fns.has(fnId),
+    isContracted: (fnId) => vis.contracted.has(fnId),
   };
 }
 

@@ -9,8 +9,8 @@ const mini: Graph = JSON.parse(
   readFileSync(resolve(import.meta.dirname, '../../fixtures/mini.graph.json'), 'utf8'),
 );
 
-// These tests cover collapse and expansion alone, so nothing is hidden.
-const shown = (g: Graph) => visible(g, removeUserHidden(g, []), new Set());
+// These tests cover collapse and expansion alone, so every file shows its private fns.
+const shown = (g: Graph) => visible(g, removeUserHidden(g, []), new Set(g.files.keys()));
 const unhidden = shown(mini);
 
 // Files: 0 album, 1 db/util, 2 app, 3 shapes, 4 ui, 5 ui/util, 6 vis.

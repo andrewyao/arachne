@@ -75,18 +75,45 @@ export function removeUserHidden(
 }
 
 /**
- * Private fns outside `showPrivate` that someone calls. Callers are counted in the full graph,
- * so hiding a fn never surfaces its private helpers as new roots. Recursion alone is not a
- * caller: a private fn only its own body calls is still an entry point.
+ * The private fns outside `showPrivate` that get contracted. Such a candidate stays visible as
+ * an entry point when no other fn leads into it: nothing outside the candidates reaches it, and
+ * it sits in a source component of the candidates nothing else reaches (an uncalled helper, a
+ * mutually recursive pair nobody calls). Every other candidate is hidden. Callers count in the
+ * full graph, so hiding a module never surfaces its private helpers as new roots.
  */
 export function hiddenFns(g: Graph, showPrivate: ReadonlySet<number>): Set<number> {
-  const called = new Set<number>();
-  for (const [caller, callee] of g.edges) if (caller !== callee) called.add(callee);
-  const hidden = new Set<number>();
-  g.fns.forEach((fn, id) => {
-    if (fn.private && !showPrivate.has(fn.file) && called.has(id)) hidden.add(id);
-  });
-  return hidden;
+  const candidate = (id: number) => g.fns[id]!.private && !showPrivate.has(g.fns[id]!.file);
+  const out = new Map<number, number[]>();
+  for (const [a, b] of g.edges) {
+    if (!candidate(b)) continue;
+    let list = out.get(a);
+    if (!list) out.set(a, (list = []));
+    list.push(b);
+  }
+  const reach = (from: Iterable<number>, into: Set<number>) => {
+    const queue = [...from];
+    while (queue.length) {
+      for (const w of out.get(queue.pop()!) ?? []) {
+        if (into.has(w)) continue;
+        into.add(w);
+        queue.push(w);
+      }
+    }
+  };
+
+  const reached = new Set<number>();
+  reach([...out.keys()].filter((v) => !candidate(v)), reached);
+
+  const unreached: number[] = [];
+  g.fns.forEach((_, id) => candidate(id) && !reached.has(id) && unreached.push(id));
+  const { of, members } = components(unreached, (v) => (out.get(v) ?? []).filter((w) => !reached.has(w)));
+  const entered = new Set<number>();
+  for (const v of unreached) for (const w of out.get(v) ?? []) if (of.get(w) !== of.get(v)) entered.add(of.get(w)!);
+  const entries = members.flatMap((m, c) => (entered.has(c) ? [] : m));
+
+  reach(entries, reached);
+  for (const e of entries) reached.delete(e);
+  return reached;
 }
 
 /**
@@ -101,7 +128,20 @@ export function contract(edges: Graph['edges'], hidden: ReadonlySet<number>): Ed
     if (!list) out.set(a, (list = []));
     list.push([b, n]);
   }
-  const exits = hiddenExits(out, hidden);
+
+  // Visible fns reachable from each hidden fn through hidden fns only. Components come out
+  // after every component they reach, so one pass fills each exit set from finished successors,
+  // and hidden cycles terminate.
+  const { of, members } = components(hidden, (v) => (out.get(v) ?? []).filter(([w]) => hidden.has(w)).map(([w]) => w));
+  const exits: Set<number>[] = members.map(() => new Set());
+  members.forEach((group, c) => {
+    for (const m of group) {
+      for (const [x] of out.get(m) ?? []) {
+        if (!hidden.has(x)) exits[c]!.add(x);
+        else if (of.get(x) !== c) for (const e of exits[of.get(x)!]!) exits[c]!.add(e);
+      }
+    }
+  });
 
   const result: Edge[] = [];
   for (const [u, callees] of out) {
@@ -115,40 +155,37 @@ export function contract(edges: Graph['edges'], hidden: ReadonlySet<number>): Ed
     const via = new Set<number>();
     for (const [h] of callees) {
       if (!hidden.has(h)) continue;
-      for (const x of exits(h)) if (x !== u && !direct.has(x)) via.add(x);
+      for (const x of exits[of.get(h)!]!) if (x !== u && !direct.has(x)) via.add(x);
     }
     for (const x of via) result.push([u, x, 1, true]);
   }
   return result;
 }
 
-// Visible fns reachable from each hidden fn through hidden fns only. Tarjan's algorithm emits
-// each strongly connected component after every component it reaches, so one pass fills a
-// per-component exit set from successors already done, and hidden cycles terminate.
-function hiddenExits(
-  out: ReadonlyMap<number, readonly (readonly [number, number])[]>,
-  hidden: ReadonlySet<number>,
-): (h: number) => ReadonlySet<number> {
+/**
+ * Strongly connected components of the subgraph on `nodes` (Tarjan, iterative). `members` lists
+ * them in the order Tarjan finishes them, so each comes after every component it reaches.
+ */
+function components(
+  nodes: Iterable<number>,
+  succ: (v: number) => number[],
+): { of: Map<number, number>; members: number[][] } {
   const index = new Map<number, number>();
   const low = new Map<number, number>();
   const onStack = new Set<number>();
   const stack: number[] = [];
-  const sccOf = new Map<number, number>();
-  const sccExits: Set<number>[] = [];
-  let next = 0;
+  const of = new Map<number, number>();
+  const members: number[][] = [];
 
-  const hiddenCallees = (v: number) => (out.get(v) ?? []).filter(([w]) => hidden.has(w)).map(([w]) => w);
-
-  for (const root of hidden) {
+  for (const root of nodes) {
     if (index.has(root)) continue;
     const frames: { v: number; succ: number[]; i: number }[] = [];
     const enter = (v: number) => {
-      index.set(v, next);
-      low.set(v, next);
-      next++;
+      index.set(v, index.size);
+      low.set(v, index.get(v)!);
       stack.push(v);
       onStack.add(v);
-      frames.push({ v, succ: hiddenCallees(v), i: 0 });
+      frames.push({ v, succ: succ(v), i: 0 });
     };
     enter(root);
     while (frames.length) {
@@ -164,26 +201,18 @@ function hiddenExits(
       if (parent) low.set(parent.v, Math.min(low.get(parent.v)!, low.get(f.v)!));
       if (low.get(f.v) !== index.get(f.v)) continue;
 
-      const id = sccExits.length;
-      const members: number[] = [];
+      const group: number[] = [];
       let w: number;
       do {
         w = stack.pop()!;
         onStack.delete(w);
-        sccOf.set(w, id);
-        members.push(w);
+        of.set(w, members.length);
+        group.push(w);
       } while (w !== f.v);
-      const exits = new Set<number>();
-      for (const m of members) {
-        for (const [x] of out.get(m) ?? []) {
-          if (!hidden.has(x)) exits.add(x);
-          else if (sccOf.get(x) !== id) for (const e of sccExits[sccOf.get(x)!]!) exits.add(e);
-        }
-      }
-      sccExits.push(exits);
+      members.push(group);
     }
   }
-  return (h) => sccExits[sccOf.get(h)!]!;
+  return { of, members };
 }
 
 /** What the view draws: nodes that exist and the edges between them. */
@@ -192,13 +221,17 @@ export interface Visible {
   hiddenFiles: ReadonlySet<number>;
   /** Fns without a node: user-hidden, or contracted private fns. */
   hiddenFns: ReadonlySet<number>;
+  /** Private fns contracted away. Disjoint from the user-hidden fns. */
+  contracted: ReadonlySet<number>;
   /** Files with fns, none of them visible. They stay as a collapsed node, drawn dimmed. */
   vacant: ReadonlySet<number>;
   edges: Edge[];
 }
 
-export function visible(g: Graph, pruned: Pruned, privateHidden: ReadonlySet<number>): Visible {
-  const hidden = new Set([...pruned.fns, ...privateHidden]);
+export function visible(g: Graph, pruned: Pruned, showPrivate: ReadonlySet<number>): Visible {
+  const contracted = hiddenFns(g, showPrivate);
+  for (const fn of pruned.fns) contracted.delete(fn);
+  const hidden = new Set([...pruned.fns, ...contracted]);
   const vacant = new Set<number>();
   g.files.forEach((file, id) => {
     const [start, end] = file.fns;
@@ -206,5 +239,5 @@ export function visible(g: Graph, pruned: Pruned, privateHidden: ReadonlySet<num
     for (let fn = start; fn < end; fn++) if (!hidden.has(fn)) return;
     vacant.add(id);
   });
-  return { hiddenFiles: pruned.files, hiddenFns: hidden, vacant, edges: contract(pruned.edges, privateHidden) };
+  return { hiddenFiles: pruned.files, hiddenFns: hidden, contracted, vacant, edges: contract(pruned.edges, contracted) };
 }

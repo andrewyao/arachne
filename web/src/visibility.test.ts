@@ -7,7 +7,6 @@ import {
   contract,
   fileHiddenKey,
   fnHiddenKey,
-  hiddenFns,
   parseHiddenKey,
   removeUserHidden,
   visible,
@@ -38,7 +37,7 @@ function render(
   g: Graph,
   { hide = [], showPrivate = [], expanded = 'all' }: { hide?: HiddenKey[]; showPrivate?: number[]; expanded?: 'all' | number[] },
 ): View {
-  const v = visible(g, removeUserHidden(g, hide), hiddenFns(g, new Set(showPrivate)));
+  const v = visible(g, removeUserHidden(g, hide), new Set(showPrivate));
   const open = expanded === 'all' ? effectiveExpanded('all', new Set(), g.files.length) : new Set(expanded);
   return project(g, v, open);
 }
@@ -81,6 +80,33 @@ describe('private fn contraction', () => {
     expect(nodes(g, view)).toEqual(['E', 'main', 'rec']);
     expect(edges(g, view)).toEqual(['main => E x1', 'rec -> E x1']);
     expect(nodes(mini, render(mini, {}))).toContain('app.main');
+  });
+
+  it('keeps a private cycle nobody else calls visible, with its calls out', () => {
+    const g = build(
+      { m: [['even', true], ['odd', true], ['E', false], ['lone', true]] },
+      [['even', 'odd'], ['odd', 'even'], ['odd', 'E']],
+    );
+    const view = render(g, {});
+    expect(nodes(g, view)).toEqual(['E', 'even', 'lone', 'odd']);
+    expect(edges(g, view)).toEqual(['even -> odd x1', 'odd -> E x1', 'odd -> even x1']);
+  });
+
+  it('contracts a private cycle that an uncalled private entry point reaches', () => {
+    const g = build(
+      { m: [['main', true], ['C', true], ['D', true], ['E', false]] },
+      [['main', 'C'], ['C', 'D'], ['D', 'C'], ['D', 'E']],
+    );
+    const view = render(g, {});
+    expect(nodes(g, view)).toEqual(['E', 'main']);
+    expect(edges(g, view)).toEqual(['main => E x1']);
+  });
+
+  it('keeps hiding a private helper whose only caller the user hid', () => {
+    const g = build({ m: [['A', false], ['helper', true], ['E', false]] }, [['A', 'helper'], ['helper', 'E']]);
+    const view = render(g, { hide: [fnHiddenKey(g, 0)] });
+    expect(nodes(g, view)).toEqual(['E']);
+    expect(edges(g, view)).toEqual([]);
   });
 
   it('shows the private fns of one file and keeps contracting the rest', () => {
@@ -175,7 +201,7 @@ describe('private fn contraction', () => {
 
   it('keeps a file whose fns are all hidden as a collapsed, vacant node, even when expanded', () => {
     const g = build({ a: [['A', false]], b: [['C', true]] }, [['A', 'C']]);
-    const v = visible(g, removeUserHidden(g, []), hiddenFns(g, new Set()));
+    const v = visible(g, removeUserHidden(g, []), new Set());
     expect([...v.vacant]).toEqual([1]);
     expect(nodes(g, project(g, v, new Set([0, 1])))).toEqual(['A', '[b]']);
   });
