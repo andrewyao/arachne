@@ -43,6 +43,7 @@ function readTheme(): Theme {
 const FN_RADIUS = 3;
 const HULL_PAD = 14;
 const DOUBLE_CLICK_MS = 350;
+const CHARGE_RANGE = 300;
 const DIMMED_ALPHA = 0.15;
 
 export interface GraphView {
@@ -66,6 +67,7 @@ export function createGraphView(
   let lastFnClick: { fnId: number; at: number } | null = null;
   let theme = readTheme();
   let fitted = false;
+  let visible = { x0: -Infinity, y0: -Infinity, x1: Infinity, y1: Infinity };
 
   const radius = (n: ViewNode): number => {
     switch (n.kind) {
@@ -96,7 +98,7 @@ export function createGraphView(
     .linkDirectionalArrowLength((l) => 3.5 + Math.log2(l.count))
     .linkDirectionalArrowRelPos(1)
     .linkColor(linkColor)
-    .onRenderFramePre(paintHulls)
+    .onRenderFramePre(beforeFrame)
     .onNodeHover((n) => {
       hovered = n;
       root.style.cursor = n && n.kind !== 'crate' ? 'pointer' : '';
@@ -110,6 +112,10 @@ export function createGraphView(
       fitted = true;
       fg.zoomToFit(400, 80);
     });
+
+  // Unbounded many-body repulsion dominated frame time with 5k expanded fns; distant
+  // clusters barely push each other anyway.
+  fg.d3Force('charge')?.distanceMax(CHARGE_RANGE);
 
   new ResizeObserver(() => fg.width(root.clientWidth).height(root.clientHeight)).observe(root);
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
@@ -259,7 +265,9 @@ export function createGraphView(
     }
 
     // Fn labels only once zoomed in, which keeps 5k-node frames cheap and legible.
-    const showLabel = n.kind !== 'fn' || scale > 1.4 || n === hovered || n.id === selected;
+    const showLabel =
+      (n.kind !== 'fn' || scale > 1.4 || n === hovered || n.id === selected) &&
+      x > visible.x0 && x < visible.x1 && y > visible.y0 && y < visible.y1;
     if (showLabel) {
       const size = (n.kind === 'fn' ? 11 : 12) / scale;
       ctx.font = `${n.kind === 'file' ? 600 : 400} ${size}px ${theme.sans}`;
@@ -271,7 +279,11 @@ export function createGraphView(
     ctx.globalAlpha = 1;
   }
 
-  function paintHulls(ctx: CanvasRenderingContext2D, scale: number) {
+  function beforeFrame(ctx: CanvasRenderingContext2D, scale: number) {
+    const a = fg.screen2GraphCoords(0, 0);
+    const b = fg.screen2GraphCoords(fg.width(), fg.height());
+    const margin = 120 / scale;
+    visible = { x0: a.x - margin, y0: a.y - margin, x1: b.x + margin, y1: b.y + margin };
     hulls = new Map();
     for (const fileId of expanded) {
       const [start, end] = graph.files[fileId]!.fns;
@@ -364,8 +376,8 @@ function convexHull(points: Point[]): Point[] {
 function padded(points: Point[], pad: number): Point[] {
   const ring: Point[] = [];
   for (const [x, y] of convexHull(points)) {
-    for (let k = 0; k < 16; k++) {
-      const a = (k * Math.PI) / 8;
+    for (let k = 0; k < 10; k++) {
+      const a = (k * Math.PI) / 5;
       ring.push([x + pad * Math.cos(a), y + pad * Math.sin(a)]);
     }
   }

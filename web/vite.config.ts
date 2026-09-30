@@ -28,8 +28,16 @@ function fixtureApi(): Plugin {
           res.end('no such file');
           return;
         }
+        let text: Buffer;
+        try {
+          text = await readFile(resolve(FIXTURE_ROOT, file.path));
+        } catch {
+          res.statusCode = 404;
+          res.end(`${file.path} is not under ${FIXTURE_ROOT}`);
+          return;
+        }
         res.setHeader('content-type', 'text/plain; charset=utf-8');
-        res.end(await readFile(resolve(FIXTURE_ROOT, file.path)));
+        res.end(text);
       });
     },
   };

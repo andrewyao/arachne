@@ -56,7 +56,7 @@ export function createCodePanel(root: HTMLElement, graph: Graph): CodePanel {
     let p = sources.get(fileId);
     if (!p) {
       p = fetch(`/api/source/${fileId}`).then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        if (!r.ok) throw new Error(`the server returned HTTP ${r.status}`);
         return r.text();
       });
       p.catch(() => sources.delete(fileId));
@@ -95,7 +95,7 @@ export function createCodePanel(root: HTMLElement, graph: Graph): CodePanel {
         } catch (err) {
           if (request !== latest) return;
           shownFile = null;
-          root.replaceChildren(head, el('p', 'panel-error', `Could not load ${file.path}: ${String(err)}`));
+          root.replaceChildren(head, el('p', 'panel-error', `Could not load ${file.path}: ${err instanceof Error ? err.message : String(err)}.`));
           return;
         }
         if (request !== latest) return;
