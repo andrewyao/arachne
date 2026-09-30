@@ -60,18 +60,23 @@ export function project(g: Graph, v: Visible, expanded: ReadonlySet<number>): Vi
     return open.has(file) ? fnKey(e) : fileKey(file);
   };
 
-  const links = new Map<string, ViewLink>();
+  // Direct calls win: a link counts only its direct calls when it has any, and is drawn as
+  // via only when every call it aggregates runs through contracted fns.
+  const links = new Map<string, { source: NodeKey; target: NodeKey; direct: number; via: number }>();
   for (const [caller, callee, count, via] of v.edges) {
     const source = endpoint(caller);
     const target = endpoint(callee);
     if (source === target) continue;
     const pair = `${source}>${target}`;
-    const link = links.get(pair);
-    if (!link) links.set(pair, { source, target, count, via });
-    else {
-      link.count += count;
-      link.via ||= via;
-    }
+    let link = links.get(pair);
+    if (!link) links.set(pair, (link = { source, target, direct: 0, via: 0 }));
+    if (via) link.via += count;
+    else link.direct += count;
   }
-  return { nodes, links: [...links.values()] };
+  return {
+    nodes,
+    links: [...links.values()].map(({ source, target, direct, via }) =>
+      direct ? { source, target, count: direct, via: false } : { source, target, count: via, via: true },
+    ),
+  };
 }

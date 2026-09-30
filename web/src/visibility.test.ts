@@ -103,12 +103,22 @@ describe('private fn contraction', () => {
     expect(edges(g, render(g, {}))).toEqual(['B -> E x3', 'B => F x1']);
   });
 
-  it('marks a collapsed file link as via when any call it aggregates is', () => {
+  it('draws a collapsed link with any direct call solid, with only the direct count', () => {
+    for (const calls of [
+      [['A2', 'F', 2], ['A', 'C'], ['C', 'E']],
+      [['A', 'C'], ['C', 'E'], ['A2', 'F', 2]],
+    ] as [string, string, number?][][]) {
+      const g = build({ a: [['A', false], ['A2', false], ['C', true]], b: [['E', false], ['F', false]] }, calls);
+      expect(edges(g, render(g, { expanded: [] }))).toEqual(['[a] -> [b] x2']);
+    }
+  });
+
+  it('draws a collapsed link dashed when every call it aggregates is via, counting the via edges', () => {
     const g = build(
       { a: [['A', false], ['A2', false], ['C', true]], b: [['E', false], ['F', false]] },
-      [['A2', 'F', 2], ['A', 'C'], ['C', 'E']],
+      [['A', 'C'], ['A2', 'C'], ['C', 'E'], ['C', 'F']],
     );
-    expect(edges(g, render(g, { expanded: [] }))).toEqual(['[a] => [b] x3']);
+    expect(edges(g, render(g, { expanded: [] }))).toEqual(['[a] => [b] x4']);
   });
 
   it('agrees with a breadth-first search through hidden fns on random graphs', () => {
