@@ -1,4 +1,6 @@
+import { forceCollide } from 'd3-force-3d';
 import ForceGraph from 'force-graph';
+import { clusterForce } from './layout';
 import { fileKey, fnKey, project, type NodeKey, type ViewNode } from './project';
 import type { Graph } from './types';
 
@@ -41,6 +43,10 @@ const HULL_PAD = 14;
 const DOUBLE_CLICK_MS = 350;
 const CHARGE_RANGE = 300;
 const DIMMED_ALPHA = 0.15;
+const COLLIDE_PAD = 2;
+const CLUSTER = { pull: 0.15, gap: 16, push: 0.3 };
+const LINK_SAME_FILE = { distance: 18, strength: 1 };
+const LINK_CROSS = { distance: 70, strength: 0.15 };
 
 export interface GraphView {
   expand(fileId: number): void;
@@ -110,6 +116,18 @@ export function createGraphView(
   // Unbounded many-body repulsion dominated frame time with 5k expanded fns; distant
   // clusters barely push each other anyway.
   fg.d3Force('charge')?.distanceMax(CHARGE_RANGE);
+  fg.d3Force('collide', forceCollide<SimNode>((n) => n.r + COLLIDE_PAD).iterations(2));
+  fg.d3Force('cluster', clusterForce<SimNode>(fileOfFn, CLUSTER));
+  const inFile = (l: SimLink) => {
+    const a = fileOfFn(l.source as SimNode);
+    return a !== undefined && a === fileOfFn(l.target as SimNode);
+  };
+  // d3's default link strength, 1 / min(degree), keeps hubs from being yanked around.
+  const baseStrength = (l: SimLink) =>
+    1 / Math.max(1, Math.min(degree(l.source as SimNode), degree(l.target as SimNode)));
+  fg.d3Force('link')
+    ?.distance((l: SimLink) => (inFile(l) ? LINK_SAME_FILE : LINK_CROSS).distance)
+    .strength((l: SimLink) => (inFile(l) ? LINK_SAME_FILE : LINK_CROSS).strength * baseStrength(l));
 
   new ResizeObserver(() => fg.width(root.clientWidth).height(root.clientHeight)).observe(root);
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
@@ -125,6 +143,14 @@ export function createGraphView(
   refresh();
   // Lets the browser verification script find node screen positions.
   if (import.meta.env.DEV) Object.assign(window, { __arachneGraph: fg });
+
+  function fileOfFn(n: SimNode): number | undefined {
+    return n.kind === 'fn' ? graph.fns[n.id]!.file : undefined;
+  }
+
+  function degree(n: SimNode): number {
+    return neighbors.get(n.key)?.size ?? 0;
+  }
 
   function refresh() {
     const view = project(graph, expanded);
