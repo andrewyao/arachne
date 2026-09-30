@@ -75,7 +75,9 @@ body {
 .app {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(360px, 44%);
+  grid-template-rows: minmax(0, 1fr);
   height: 100vh;
+  overflow: hidden;
 }
 
 .stage {
@@ -228,6 +230,7 @@ body {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
   border-left: 1px solid var(--rule);
   background: var(--surface);
 }
