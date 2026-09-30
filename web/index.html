@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>arachne</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='4' fill='%232f6f73'/%3E%3Ccircle cx='2.5' cy='3' r='1.6' fill='%23a8791c'/%3E%3Ccircle cx='13.5' cy='12.5' r='1.6' fill='%23a8791c'/%3E%3C/svg%3E"
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Mono:wght@400;600&family=Atkinson+Hyperlegible+Next:wght@400;600&display=swap"
+    />
+  </head>
+  <body>
+    <main class="app">
+      <section class="stage">
+        <div id="graph" class="graph"></div>
+        <header class="bar">
+          <span class="wordmark">arachne</span>
+          <div class="search" id="search"></div>
+        </header>
+        <p class="hint" id="hint">
+          Click a file to open it. Double-click a function, or click the outline around it, to close the file.
+        </p>
+      </section>
+      <aside class="panel" id="panel"></aside>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

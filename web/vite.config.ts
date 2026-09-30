@@ -3,10 +3,11 @@ import { resolve } from 'node:path';
 import { defineConfig, type Plugin } from 'vite';
 import type { Graph } from './src/types.ts';
 
-const FIXTURE_GRAPH = resolve(import.meta.dirname, '../fixtures/mini.graph.json');
-const FIXTURE_ROOT = resolve(import.meta.dirname, '../fixtures/mini');
+const FIXTURE_GRAPH = process.env.ARACHNE_GRAPH ?? resolve(import.meta.dirname, '../fixtures/mini.graph.json');
+const FIXTURE_ROOT = process.env.ARACHNE_ROOT ?? resolve(import.meta.dirname, '../fixtures/mini');
 
-// Stands in for the Rust server during `npm run dev`, serving the mini fixture.
+// Stands in for the Rust server during `npm run dev`. Serves the mini fixture
+// unless ARACHNE_GRAPH / ARACHNE_ROOT point at another graph and source tree.
 function fixtureApi(): Plugin {
   return {
     name: 'arachne-fixture-api',
@@ -36,5 +37,6 @@ function fixtureApi(): Plugin {
 
 export default defineConfig({
   plugins: [fixtureApi()],
-  build: { outDir: 'dist', emptyOutDir: true },
+  // Served from localhost by the embedding binary, so one bundle beats code-splitting.
+  build: { outDir: 'dist', emptyOutDir: true, chunkSizeWarningLimit: 800 },
 });
