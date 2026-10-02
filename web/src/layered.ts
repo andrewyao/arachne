@@ -26,6 +26,11 @@ const PAD = 10;
 const FILE_GAP = 160;
 const STACK_GAP = 30;
 const SWEEPS = 6;
+// Width over height the layout aims for when its columns would otherwise make it a thin band.
+const ASPECT = 1.5;
+const SPREAD_SWEEPS = 8;
+// How far a box moves from its slot in the even spread toward the rows it connects to.
+const PULL = 0.3;
 
 export const edgeKey = (caller: number, callee: number) => `${caller}>${callee}`;
 
@@ -57,19 +62,65 @@ export function layout({ files, edges, width }: LayoutInput): Layout {
     for (const key of back) backward.add(key);
   }
   const height = (file: number) => 2 * PAD + Math.max(0, lists.get(file)!.length - 1) * ROW;
+  const offset = new Map<number, number>();
+  for (const list of lists.values()) list.forEach((fn, i) => offset.set(fn, PAD + i * ROW));
+  // Per file, each call to or from another file as [own fn, other fn].
+  const ties = new Map<number, [number, number][]>([...files.keys()].map((f) => [f, []]));
+  for (const [a, b] of calls.values()) {
+    const [fa, fb] = [fileOf.get(a)!, fileOf.get(b)!];
+    if (fa === fb) continue;
+    ties.get(fa)!.push([a, b]);
+    ties.get(fb)!.push([b, a]);
+  }
 
   const outer = columns([...files.keys()], [...between.values()]);
-  const boxes = new Map<number, Box>();
+  const xs: number[] = [];
   let x = 0;
   for (const column of outer.columns) {
-    const total = column.reduce((sum, f) => sum + height(f), 0) + (column.length - 1) * STACK_GAP;
-    let y = -total / 2;
-    for (const f of column) {
-      boxes.set(f, { x0: x, y0: y, x1: x + width(f), y1: y + height(f) });
-      y += height(f) + STACK_GAP;
-    }
+    xs.push(x);
     x += Math.max(0, ...column.map(width)) + FILE_GAP;
   }
+  const stacked = (column: number[]) => column.reduce((sum, f) => sum + height(f), 0) + (column.length - 1) * STACK_GAP;
+  // Columns share one height: enough for the tallest stack, and tall enough to keep the layout
+  // near ASPECT so it fills a screen rather than a thin band.
+  const span = Math.max(...outer.columns.map(stacked), (x - FILE_GAP) / ASPECT);
+  const top = new Map<number, number>();
+  const slot = new Map<number, number>();
+  for (const column of outer.columns) {
+    const gap = Math.max(STACK_GAP, (span - stacked(column) + (column.length - 1) * STACK_GAP) / column.length);
+    let y = -span / 2 + (gap - STACK_GAP) / 2;
+    for (const f of column) {
+      slot.set(f, y);
+      top.set(f, y);
+      y += height(f) + gap;
+    }
+  }
+  // Each box drifts toward the rows it calls or is called by, so calls between files run closer
+  // to level, while keeping its place in the column and STACK_GAP from its neighbors. Pulled
+  // only by each other, boxes would bunch into a band again, so each stays tied to its slot in
+  // the even spread.
+  for (let s = 0; s < SPREAD_SWEEPS; s++) {
+    const order = s % 2 ? [...outer.columns].reverse() : outer.columns;
+    for (const column of order) {
+      const want = column.map((f) => {
+        const t = ties.get(f)!;
+        if (!t.length) return slot.get(f)!;
+        const pull = t.reduce((sum, [own, other]) => sum + top.get(fileOf.get(other)!)! + offset.get(other)! - offset.get(own)!, 0) / t.length;
+        return lerp(slot.get(f)!, pull, PULL);
+      });
+      const ys = [...want];
+      ys[0] = Math.max(ys[0]!, -span / 2);
+      for (let i = 1; i < column.length; i++) ys[i] = Math.max(ys[i]!, ys[i - 1]! + height(column[i - 1]!) + STACK_GAP);
+      const last = column.length - 1;
+      ys[last] = Math.min(ys[last]!, span / 2 - height(column[last]!));
+      for (let i = last - 1; i >= 0; i--) ys[i] = Math.min(ys[i]!, ys[i + 1]! - STACK_GAP - height(column[i]!));
+      column.forEach((f, i) => top.set(f, ys[i]!));
+    }
+  }
+  const boxes = new Map<number, Box>();
+  outer.columns.forEach((column, c) => {
+    for (const f of column) boxes.set(f, { x0: xs[c]!, y0: top.get(f)!, x1: xs[c]! + width(f), y1: top.get(f)! + height(f) });
+  });
 
   const fns = new Map<number, Point>();
   for (const [file, list] of lists) {
@@ -195,3 +246,5 @@ function feedbackOrder(nodes: number[], edges: [number, number][]): Map<number, 
   }
   return new Map([...head, ...tail.reverse()].map((v, i) => [v, i]));
 }
+
+const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
