@@ -9,8 +9,9 @@
   --link: rgba(29, 39, 42, 0.13);
   --link-hot: rgba(29, 39, 42, 0.7);
   --link-dim: rgba(29, 39, 42, 0.05);
-  --hull: rgba(47, 111, 115, 0.09);
-  --hull-edge: rgba(47, 111, 115, 0.35);
+  --box-open: rgba(47, 111, 115, 0.09);
+  --box-edge: rgba(47, 111, 115, 0.35);
+  --box: rgba(47, 111, 115, 0.2);
   --select: #c2410c;
   --range: rgba(168, 121, 28, 0.16);
   --range-edge: #a8791c;
@@ -40,8 +41,9 @@
     --link: rgba(214, 221, 217, 0.11);
     --link-hot: rgba(214, 221, 217, 0.7);
     --link-dim: rgba(214, 221, 217, 0.04);
-    --hull: rgba(116, 182, 178, 0.08);
-    --hull-edge: rgba(116, 182, 178, 0.35);
+    --box-open: rgba(116, 182, 178, 0.08);
+    --box-edge: rgba(116, 182, 178, 0.35);
+    --box: rgba(116, 182, 178, 0.2);
     --select: #ff8a5b;
     --range: rgba(224, 181, 74, 0.13);
     --range-edge: #e0b54a;
@@ -645,17 +647,33 @@ body {
   font-family: var(--mono);
 }
 
-/* canvas tooltip from force-graph */
-
-.float-tooltip-kap {
-  padding: 4px 8px !important;
-  border-radius: 4px !important;
-  background: var(--ink) !important;
-  color: var(--bg) !important;
-  font: 12px/1.4 var(--mono) !important;
+.graph canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: block;
+  user-select: none;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.float-tooltip-kap .tip-path {
+.graph-tip {
+  position: absolute;
+  width: max-content;
+  max-width: max(50%, 150px);
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: var(--ink);
+  color: var(--bg);
+  font: 12px/1.4 var(--mono);
+  pointer-events: none;
+}
+
+.graph-tip[hidden] {
+  display: none;
+}
+
+.graph-tip .tip-path {
   opacity: 0.75;
 }
 
