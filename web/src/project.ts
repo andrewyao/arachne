@@ -13,6 +13,8 @@ export interface ViewLink {
   count: number;
   /** Some call it aggregates runs through contracted private fns. */
   via: boolean;
+  /** One of the calls it aggregates, of the kind it counts. A collapsed file draws it as this call. */
+  sample: readonly [caller: number, callee: number];
 }
 
 export interface View {
@@ -62,21 +64,26 @@ export function project(g: Graph, v: Visible, expanded: ReadonlySet<number>): Vi
 
   // Direct calls win: a link counts only its direct calls when it has any, and is drawn as
   // via only when every call it aggregates runs through contracted fns.
-  const links = new Map<string, { source: NodeKey; target: NodeKey; direct: number; via: number }>();
+  type Tally = { count: number; sample: readonly [number, number] } | null;
+  const links = new Map<string, { source: NodeKey; target: NodeKey; direct: Tally; via: Tally }>();
   for (const [caller, callee, count, via] of v.edges) {
     const source = endpoint(caller);
     const target = endpoint(callee);
     if (source === target) continue;
     const pair = `${source}>${target}`;
     let link = links.get(pair);
-    if (!link) links.set(pair, (link = { source, target, direct: 0, via: 0 }));
-    if (via) link.via += count;
-    else link.direct += count;
+    if (!link) links.set(pair, (link = { source, target, direct: null, via: null }));
+    const kind = via ? 'via' : 'direct';
+    const tally = link[kind];
+    if (tally) tally.count += count;
+    else link[kind] = { count, sample: [caller, callee] };
   }
   return {
     nodes,
     links: [...links.values()].map(({ source, target, direct, via }) =>
-      direct ? { source, target, count: direct, via: false } : { source, target, count: via, via: true },
+      direct
+        ? { source, target, count: direct.count, via: false, sample: direct.sample }
+        : { source, target, count: via!.count, via: true, sample: via!.sample },
     ),
   };
 }

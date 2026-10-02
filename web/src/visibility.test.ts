@@ -144,7 +144,9 @@ describe('private fn contraction', () => {
       [['A', 'C'], ['C', 'E'], ['A2', 'F', 2]],
     ] as [string, string, number?][][]) {
       const g = build({ a: [['A', false], ['A2', false], ['C', true]], b: [['E', false], ['F', false]] }, calls);
-      expect(edges(g, render(g, { expanded: [] }))).toEqual(['[a] -> [b] x2']);
+      const view = render(g, { expanded: [] });
+      expect(edges(g, view)).toEqual(['[a] -> [b] x2']);
+      expect(view.links[0]!.sample.map((fn) => g.fns[fn]!.label)).toEqual(['A2', 'F']);
     }
   });
 
